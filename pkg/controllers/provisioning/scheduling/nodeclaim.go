@@ -66,7 +66,7 @@ func NewNodeClaim(nodeClaimTemplate *NodeClaimTemplate, topology *Topology, daem
 
 func (n *NodeClaim) Add(pod *v1.Pod, podRequests v1.ResourceList) error {
 	// Check Taints
-	if err := scheduling.Taints(n.Spec.Taints).Tolerates(pod); err != nil {
+	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
 		return err
 	}
 
