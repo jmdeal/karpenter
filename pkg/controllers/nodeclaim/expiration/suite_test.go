@@ -94,7 +94,7 @@ var _ = Describe("Expiration", func() {
 		})
 	})
 	Context("Metrics", func() {
-		It("should fire a karpenter_nodeclaims_disrupted metric when expired", func() {
+		It("should fire a karpenter_nodeclaims_disrupted_total metric when expired", func() {
 			ExpectApplied(ctx, env.Client, nodeClaim)
 
 			// step forward to make the node expired
@@ -103,7 +103,7 @@ var _ = Describe("Expiration", func() {
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
 
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_disrupted_total", map[string]string{
 				"type":     "expiration",
 				"nodepool": nodePool.Name,
 			})
@@ -119,7 +119,7 @@ var _ = Describe("Expiration", func() {
 			ExpectObjectReconciled(ctx, env.Client, expirationController, nodeClaim)
 
 			ExpectNotFound(ctx, env.Client, nodeClaim)
-			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated", map[string]string{
+			metric, found := FindMetricWithLabelValues("karpenter_nodeclaims_terminated_total", map[string]string{
 				"reason":        "expiration",
 				"nodepool":      nodePool.Name,
 				"capacity_type": nodeClaim.Labels[v1.CapacityTypeLabelKey],
