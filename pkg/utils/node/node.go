@@ -81,10 +81,7 @@ func GetProvisionablePods(ctx context.Context, kubeClient client.Client) ([]*cor
 func GetVolumeAttachments(ctx context.Context, kubeClient client.Client, node *corev1.Node) ([]*storagev1.VolumeAttachment, error) {
 	var volumeAttachmentList storagev1.VolumeAttachmentList
 	if err := kubeClient.List(ctx, &volumeAttachmentList, client.MatchingFields{"spec.nodeName": node.Name}); err != nil {
-		// If there have not been any volumeAttachments, index may not exist. Therefore, fall back to default List
-		if err = kubeClient.List(ctx, &volumeAttachmentList); err != nil {
-			return nil, fmt.Errorf("listing volumeattachments, %w", err)
-		}
+		return nil, fmt.Errorf("listing volumeattachments, %w", err)
 	}
 	return lo.FilterMap(volumeAttachmentList.Items, func(v storagev1.VolumeAttachment, _ int) (*storagev1.VolumeAttachment, bool) {
 		return &v, v.Spec.NodeName == node.Name
