@@ -133,6 +133,7 @@ func (c *Controller) finalize(ctx context.Context, node *corev1.Node) (reconcile
 			return reconcile.Result{}, fmt.Errorf("ensuring no volume attachments, %w", err)
 		}
 		if !areVolumesDetached {
+			log.FromContext(ctx).WithValues("Node", node.Name).Info("waiting on volume attachments")
 			return reconcile.Result{RequeueAfter: 1 * time.Second}, nil
 		}
 	}
