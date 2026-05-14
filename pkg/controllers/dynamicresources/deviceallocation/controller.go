@@ -60,6 +60,13 @@ type Controller struct {
 	hydrationOnce sync.Once
 }
 
+// ConsumerRef identifies a consumer of a ResourceClaim, typically a pod.
+type ConsumerRef struct {
+	UID       types.UID
+	Name      string
+	Namespace string
+}
+
 // Metadata contains supplementary information about an allocated device, derived from the ReservedFor status of all
 // ResourceClaims that reference it.
 type Metadata struct {
@@ -67,9 +74,9 @@ type Metadata struct {
 	// entirely of pod consumers. A device that is not reserved, or that is reserved by any non-pod consumer, is not
 	// releasable.
 	Releasable bool
-	// PodUIDs is the aggregate set of pod UIDs from the ReservedFor entries of all ResourceClaims that reference the
-	// device. Non-pod consumer UIDs are excluded.
-	PodUIDs []types.UID
+	// Consumers is the aggregate set of pod consumers from the ReservedFor entries of all ResourceClaims that
+	// reference the device. Non-pod consumers are excluded.
+	Consumers []ConsumerRef
 }
 
 func NewController(kubeClient client.Client) *Controller {
@@ -219,7 +226,11 @@ func claimMetadata(claim *resourcev1.ResourceClaim) Metadata {
 	for i := range claim.Status.ReservedFor {
 		ref := &claim.Status.ReservedFor[i]
 		if ref.Resource == string(corev1.ResourcePods) && ref.APIGroup == "" {
-			meta.PodUIDs = append(meta.PodUIDs, ref.UID)
+			meta.Consumers = append(meta.Consumers, ConsumerRef{
+				UID:       ref.UID,
+				Name:      ref.Name,
+				Namespace: claim.Namespace,
+			})
 		} else {
 			meta.Releasable = false
 		}
@@ -236,7 +247,7 @@ func (c *Controller) computeDeviceMetadata(device cloudprovider.DeviceID) Metada
 		if !claimMeta.Releasable {
 			meta.Releasable = false
 		}
-		meta.PodUIDs = append(meta.PodUIDs, claimMeta.PodUIDs...)
+		meta.Consumers = append(meta.Consumers, claimMeta.Consumers...)
 	}
 	return meta
 }
