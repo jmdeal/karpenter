@@ -445,7 +445,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
+					deviceallocation.Metadata{Releasable: true, Consumers: []deviceallocation.ConsumerRef{{UID: "uid-a", Name: "pod-a", Namespace: "default"}}},
 				))
 			})
 			It("is true when a claim is reserved for multiple pods", func() {
@@ -462,7 +462,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a", "uid-b"}},
+					deviceallocation.Metadata{Releasable: true, Consumers: []deviceallocation.ConsumerRef{{UID: "uid-a", Name: "pod-a", Namespace: "default"}, {UID: "uid-b", Name: "pod-b", Namespace: "default"}}},
 				))
 			})
 			It("is true when two claims sharing a device are both reserved only for pods", func() {
@@ -483,7 +483,10 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				meta := devices[deviceID("device-0")]
 				Expect(meta.Releasable).To(BeTrue())
-				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a"), types.UID("uid-b")))
+				Expect(meta.Consumers).To(ConsistOf(
+				deviceallocation.ConsumerRef{UID: "uid-a", Name: "pod-a", Namespace: "default"},
+				deviceallocation.ConsumerRef{UID: "uid-b", Name: "pod-b", Namespace: "default"},
+			))
 			})
 			// This shouldn't occur since KCM should atomically remove the allocation when it removes the last reservation. If
 			// this does occur, we should be conservative and consider the device allocated.
@@ -513,7 +516,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				meta := devices[deviceID("device-0")]
 				Expect(meta.Releasable).To(BeFalse())
-				Expect(meta.PodUIDs).To(BeNil())
+				Expect(meta.Consumers).To(BeNil())
 			})
 			It("is false when a claim is reserved for a mix of pod and non-pod consumers", func() {
 				claim := withReservedFor(
@@ -529,7 +532,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				meta := devices[deviceID("device-0")]
 				Expect(meta.Releasable).To(BeFalse())
-				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a")))
+				Expect(meta.Consumers).To(ConsistOf(deviceallocation.ConsumerRef{UID: "uid-a", Name: "pod-a", Namespace: "default"}))
 			})
 			It("is false when two claims share a device and one has a non-pod consumer", func() {
 				claimA := withReservedFor(
@@ -549,7 +552,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices := collectDevices(seq)
 				meta := devices[deviceID("device-0")]
 				Expect(meta.Releasable).To(BeFalse())
-				Expect(meta.PodUIDs).To(ConsistOf(types.UID("uid-a")))
+				Expect(meta.Consumers).To(ConsistOf(deviceallocation.ConsumerRef{UID: "uid-a", Name: "pod-a", Namespace: "default"}))
 			})
 		})
 
@@ -579,7 +582,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices = collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
+					deviceallocation.Metadata{Releasable: true, Consumers: []deviceallocation.ConsumerRef{{UID: "uid-a", Name: "pod-a", Namespace: "default"}}},
 				))
 			})
 			It("becomes releasable when the only non-pod claim sharing a device is deleted", func() {
@@ -609,7 +612,7 @@ var _ = Describe("DeviceAllocation Controller", func() {
 				devices = collectDevices(seq)
 				Expect(devices).To(HaveKeyWithValue(
 					deviceID("device-0"),
-					deviceallocation.Metadata{Releasable: true, PodUIDs: []types.UID{"uid-a"}},
+					deviceallocation.Metadata{Releasable: true, Consumers: []deviceallocation.ConsumerRef{{UID: "uid-a", Name: "pod-a", Namespace: "default"}}},
 				))
 			})
 		})

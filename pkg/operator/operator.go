@@ -18,6 +18,7 @@ package operator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -56,6 +57,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/nodeoverlay"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -97,10 +99,11 @@ func init() {
 type Operator struct {
 	manager.Manager
 
-	KubernetesInterface kubernetes.Interface
-	EventRecorder       events.Recorder
-	Clock               clock.Clock
-	InstanceTypeStore   *nodeoverlay.InstanceTypeStore
+	KubernetesInterface        kubernetes.Interface
+	EventRecorder              events.Recorder
+	Clock                      clock.Clock
+	InstanceTypeStore          *nodeoverlay.InstanceTypeStore
+	DeviceAllocationController *deviceallocation.Controller
 }
 
 type Options struct {
@@ -200,6 +203,10 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			EnableWarmup: lo.ToPtr(!options.FromContext(ctx).DisableLeaderElection && !options.FromContext(ctx).DisableControllerWarmup),
 		},
 	}
+	// dacRef holds a reference to the device allocation controller for the debug endpoint handler.
+	// It is set after the manager is created, but before the server starts accepting requests.
+	type dacHolder struct{ c *deviceallocation.Controller }
+	dacRef := &dacHolder{}
 	if options.FromContext(ctx).EnableProfiling {
 		// TODO @joinnis: Investigate the mgrOpts.PprofBindAddress that would allow native support for pprof
 		// On initial look, it seems like this native pprof doesn't support some of the routes that we have here
@@ -215,6 +222,19 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 			"/debug/pprof/block":        pprof.Handler("block"),
 			"/debug/pprof/goroutine":    pprof.Handler("goroutine"),
 			"/debug/pprof/threadcreate": pprof.Handler("threadcreate"),
+			"/debug/state/deviceallocations": http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if dacRef.c == nil {
+					http.Error(w, "device allocation controller not initialized", http.StatusServiceUnavailable)
+					return
+				}
+				state, err := dacRef.c.DebugDump(r.Context())
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(state)
+			}),
 		})
 	}
 	mgr, err := ctrl.NewManager(config, mgrOpts)
@@ -241,13 +261,16 @@ func NewOperator(o ...option.Function[Options]) (context.Context, *Operator) {
 	lo.Must0(mgr.AddHealthzCheck("healthz", healthz.Ping))
 	lo.Must0(mgr.AddReadyzCheck("readyz", healthz.Ping))
 	instanceTypeStore := nodeoverlay.NewInstanceTypeStore()
+	dac := deviceallocation.NewController(mgr.GetClient())
+	dacRef.c = dac
 
 	return ctx, &Operator{
-		Manager:             mgr,
-		KubernetesInterface: kubernetesInterface,
-		EventRecorder:       events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
-		Clock:               clock.RealClock{},
-		InstanceTypeStore:   instanceTypeStore,
+		Manager:                    mgr,
+		KubernetesInterface:        kubernetesInterface,
+		EventRecorder:              events.NewRecorder(mgr.GetEventRecorderFor(AppName)),
+		Clock:                      clock.RealClock{},
+		InstanceTypeStore:          instanceTypeStore,
+		DeviceAllocationController: dac,
 	}
 }
 
