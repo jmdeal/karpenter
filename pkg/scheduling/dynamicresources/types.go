@@ -23,6 +23,7 @@ import (
 	resourcev1 "k8s.io/api/resource/v1"
 
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
 // ID types used throughout the allocator. These use unique.Handle for efficient comparison.
@@ -36,6 +37,25 @@ type (
 
 // DeviceID is an alias for cloudprovider.DeviceID.
 type DeviceID = cloudprovider.DeviceID
+
+// NodeClaim abstracts over existing nodes, pre-initialized nodes, and in-flight NodeClaims
+// for the allocator. This allows the allocator to work uniformly regardless of the NodeClaim's
+// lifecycle phase.
+type NodeClaim interface {
+	// ID returns a unique identifier for this NodeClaim.
+	ID() NodeClaimID
+	// NodePoolID returns the NodePool this NodeClaim belongs to.
+	NodePoolID() NodePoolID
+	// Requirements returns the current scheduling requirements.
+	Requirements() scheduling.Requirements
+	// InstanceTypes returns the candidate instance types. For existing nodes, this is a single entry.
+	InstanceTypes() []InstanceTypeID
+	// ResourceSlices returns per-instance-type in-flight ResourceSlice templates.
+	// Empty for existing initialized nodes. For pre-initialized nodes, contains outstanding
+	// templates under the single known instance type. For in-flight NodeClaims, contains
+	// all candidate instance types' templates.
+	ResourceSlices() map[InstanceTypeID][]ResourceSlice
+}
 
 // ResourceSlice is the allocator's abstraction over both in-cluster (API server) ResourceSlices
 // and cloud-provider-supplied ResourceSliceTemplates. This interface avoids copying all in-cluster
