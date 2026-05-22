@@ -34,7 +34,9 @@ import (
 	"go.uber.org/multierr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -48,6 +50,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
@@ -77,29 +80,50 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider  cloudprovider.CloudProvider
-	kubeClient     client.Client
-	batcher        *Batcher[types.UID]
-	volumeTopology *scheduler.VolumeTopology
-	cluster        *state.Cluster
-	recorder       events.Recorder
-	cm             *pretty.ChangeMonitor
-	clock          clock.Clock
+	cloudProvider             cloudprovider.CloudProvider
+	kubeClient                client.Client
+	batcher                   *Batcher[types.UID]
+	volumeTopology            *scheduler.VolumeTopology
+	cluster                   *state.Cluster
+	recorder                  events.Recorder
+	cm                        *pretty.ChangeMonitor
+	clock                     clock.Clock
+	deviceAllocationController DeviceAllocationController
+}
+
+// DeviceAllocationController is the interface for querying allocated device state.
+type DeviceAllocationController interface {
+	AllocatedDevices(ctx context.Context) (func(func(cloudprovider.DeviceID, DeviceAllocationMetadata) bool), error)
+}
+
+// DeviceAllocationMetadata mirrors deviceallocation.Metadata for the provisioner's use.
+type DeviceAllocationMetadata struct {
+	Releasable bool
+	Consumers  []DeviceConsumerRef
+}
+
+// DeviceConsumerRef identifies a consumer of a ResourceClaim.
+type DeviceConsumerRef struct {
+	UID       types.UID
+	Name      string
+	Namespace string
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
 	clock clock.Clock,
+	deviceAllocationController DeviceAllocationController,
 ) *Provisioner {
 	p := &Provisioner{
-		batcher:        NewBatcher[types.UID](clock),
-		cloudProvider:  cloudProvider,
-		kubeClient:     kubeClient,
-		volumeTopology: scheduler.NewVolumeTopology(kubeClient),
-		cluster:        cluster,
-		recorder:       recorder,
-		cm:             pretty.NewChangeMonitor(),
-		clock:          clock,
+		batcher:                    NewBatcher[types.UID](clock),
+		cloudProvider:              cloudProvider,
+		kubeClient:                 kubeClient,
+		volumeTopology:             scheduler.NewVolumeTopology(kubeClient),
+		cluster:                    cluster,
+		recorder:                   recorder,
+		cm:                         pretty.NewChangeMonitor(),
+		clock:                      clock,
+		deviceAllocationController: deviceAllocationController,
 	}
 	return p
 }
@@ -239,6 +263,8 @@ func (p *Provisioner) NewScheduler(
 	ctx context.Context,
 	pods []*corev1.Pod,
 	stateNodes []*state.StateNode,
+	deletingNodeNames sets.Set[string],
+	deletingPodUIDs sets.Set[types.UID],
 	opts ...scheduler.Options,
 ) (*scheduler.Scheduler, error) {
 	nodePools, err := nodepoolutils.ListManaged(ctx, p.kubeClient, p.cloudProvider)
@@ -302,8 +328,15 @@ func (p *Provisioner) NewScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("getting daemon pods, %w", err)
 	}
+
+	// Build DRA allocator and claim index.
+	draAllocator, claimsByKey, err := p.buildDRAState(ctx, deletingNodeNames, deletingPodUIDs, instanceTypes)
+	if err != nil {
+		return nil, fmt.Errorf("building DRA state, %w", err)
+	}
+
 	// Pass volumeReqs to scheduler - added to nodeRequirements for NodeClaim zone selection
-	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, opts...), nil
+	return scheduler.NewScheduler(ctx, p.kubeClient, nodePools, p.cluster, stateNodes, topology, instanceTypes, daemonSetPods, p.recorder, p.clock, volumeReqs, draAllocator, claimsByKey, opts...), nil
 }
 
 func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
@@ -351,10 +384,23 @@ func (p *Provisioner) Schedule(ctx context.Context) (scheduler.Results, error) {
 	if options.FromContext(ctx).PreferencePolicy == options.PreferencePolicyIgnore {
 		opts = append(opts, scheduler.IgnorePreferences)
 	}
+
+	// Collect deleting node/pod info for DRA device filtering.
+	deletingNodeNames := sets.New[string]()
+	deletingPodUIDs := sets.New[types.UID]()
+	for _, sn := range nodes.Deleting() {
+		deletingNodeNames.Insert(sn.Name())
+	}
+	for _, pod := range deletingNodePods {
+		deletingPodUIDs.Insert(pod.UID)
+	}
+
 	s, err := p.NewScheduler(
 		ctx,
 		pods,
 		nodes.Active(),
+		deletingNodeNames,
+		deletingPodUIDs,
 		opts...,
 	)
 	if err != nil {
@@ -599,4 +645,76 @@ func validateNodeSelectorTerm(ctx context.Context, term corev1.NodeSelectorTerm)
 		}
 	}
 	return errs
+}
+
+// buildDRAState constructs the DRA allocator and ResourceClaim index for a scheduling loop.
+// Returns nil allocator and empty claim map if DRA is not configured (no deviceAllocationController).
+func (p *Provisioner) buildDRAState(
+	ctx context.Context,
+	deletingNodeNames sets.Set[string],
+	deletingPodUIDs sets.Set[types.UID],
+	instanceTypes map[string][]*cloudprovider.InstanceType,
+) (*dynamicresources.Allocator, map[types.NamespacedName]*resourcev1.ResourceClaim, error) {
+	if p.deviceAllocationController == nil {
+		return nil, nil, nil
+	}
+
+	// Fetch in-cluster ResourceSlices, filtering out slices owned by deleting nodes.
+	sliceList := &resourcev1.ResourceSliceList{}
+	if err := p.kubeClient.List(ctx, sliceList); err != nil {
+		return nil, nil, fmt.Errorf("listing resource slices, %w", err)
+	}
+	var inClusterSlices []dynamicresources.ResourceSlice
+	for i := range sliceList.Items {
+		s := &sliceList.Items[i]
+		if s.Spec.NodeName != nil && *s.Spec.NodeName != "" && deletingNodeNames.Has(*s.Spec.NodeName) {
+			continue
+		}
+		inClusterSlices = append(inClusterSlices, dynamicresources.NewAPIServerSlice(s))
+	}
+
+	// Compute allocated device set, excluding devices only reserved by deleting pods.
+	allocatedDeviceIter, err := p.deviceAllocationController.AllocatedDevices(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("getting allocated devices, %w", err)
+	}
+	allocatedDevices := sets.New[cloudprovider.DeviceID]()
+	allocatedDeviceIter(func(id cloudprovider.DeviceID, meta DeviceAllocationMetadata) bool {
+		if meta.Releasable && allConsumersDeleting(meta.Consumers, deletingPodUIDs) {
+			return true // skip — device will be freed
+		}
+		allocatedDevices.Insert(id)
+		return true
+	})
+
+	// Build attribute bindings from instance types grouped by NodePool.
+	attributeBindings := dynamicresources.BuildAttributeBindings(instanceTypes)
+
+	allocator := dynamicresources.NewAllocator(inClusterSlices, allocatedDevices, attributeBindings, p.kubeClient)
+
+	// Bulk-fetch ResourceClaims and build index.
+	claimList := &resourcev1.ResourceClaimList{}
+	if err := p.kubeClient.List(ctx, claimList); err != nil {
+		return nil, nil, fmt.Errorf("listing resource claims, %w", err)
+	}
+	claimsByKey := make(map[types.NamespacedName]*resourcev1.ResourceClaim, len(claimList.Items))
+	for i := range claimList.Items {
+		claim := &claimList.Items[i]
+		claimsByKey[types.NamespacedName{Namespace: claim.Namespace, Name: claim.Name}] = claim
+	}
+
+	return allocator, claimsByKey, nil
+}
+
+// allConsumersDeleting returns true if all consumers are pods that are being deleted.
+func allConsumersDeleting(consumers []DeviceConsumerRef, deletingPodUIDs sets.Set[types.UID]) bool {
+	if len(consumers) == 0 {
+		return false
+	}
+	for _, c := range consumers {
+		if !deletingPodUIDs.Has(c.UID) {
+			return false
+		}
+	}
+	return true
 }

@@ -17,12 +17,14 @@ limitations under the License.
 package scheduling
 
 import (
+	"context"
 	"fmt"
 
 	v1 "k8s.io/api/core/v1"
 
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -66,28 +68,28 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 
 // CanAdd returns whether the pod can be added to the ExistingNode
 // based on the taints/tolerations, volume requirements, host port compatibility,
-// requirements, resources, and topology requirements
-func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.Volumes) (updatedRequirements scheduling.Requirements, err error) {
+// requirements, resources, topology requirements, and DRA device availability
+func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData, volumes scheduling.Volumes, draAllocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, draAllocation dynamicresources.Allocation, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// determine the host ports that will be used if the pod schedules
 	hostPorts := scheduling.GetHostPorts(pod)
 	if err = n.VolumeUsage().ExceedsLimits(volumes); err != nil {
-		return nil, fmt.Errorf("checking volume usage, %w", err)
+		return nil, nil, fmt.Errorf("checking volume usage, %w", err)
 	}
 	if err = n.HostPortUsage().Conflicts(pod, hostPorts); err != nil {
-		return nil, fmt.Errorf("checking host port usage, %w", err)
+		return nil, nil, fmt.Errorf("checking host port usage, %w", err)
 	}
 	// check resource requests first since that's a pretty likely reason the pod won't schedule on an in-flight
 	// node, which at this point can't be increased in size
 	if !resources.Fits(podData.Requests, n.remainingResources) {
-		return nil, fmt.Errorf("exceeds node resources")
+		return nil, nil, fmt.Errorf("exceeds node resources")
 	}
 	// Check NodeClaim Affinity Requirements
 	if err = n.requirements.Compatible(podData.Requirements); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// avoid creating our temp set of requirements until after we've ensured that at least
 	// the pod is compatible
@@ -98,7 +100,7 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 	// This ensures existing node must be in the correct zone for volumes,
 	// while TSC counting uses pod's original affinity.
 	if err := addVolumeRequirements(nodeRequirements, podData.VolumeRequirements); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Check Topology Requirements
@@ -106,18 +108,31 @@ func (n *ExistingNode) CanAdd(pod *v1.Pod, podData *PodData, volumes scheduling.
 	// ensuring TSC counting uses pod's original affinity.
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.cachedTaints, podData.StrictRequirements, nodeRequirements)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err = nodeRequirements.Compatible(topologyRequirements); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	nodeRequirements.Add(topologyRequirements.Values()...)
-	return nodeRequirements, nil
+
+	// Check DRA device availability
+	var draAlloc dynamicresources.Allocation
+	if draAllocator != nil && len(podData.Claims) > 0 {
+		adapter := newExistingNodeDRAAdapter(n)
+		draResult, draErr := draAllocator.Allocate(ctx, adapter, podData.Claims)
+		if draErr != nil {
+			return nil, nil, fmt.Errorf("DRA allocation failed, %w", draErr)
+		}
+		nodeRequirements.Add(draResult.Requirements.Values()...)
+		draAlloc = draResult.Allocation
+	}
+
+	return nodeRequirements, draAlloc, nil
 }
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating
 // the ExistingNode with new requirements and volumes based on the pod scheduling
-func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes) {
+func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes, draAllocation dynamicresources.Allocation) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	resources.SubtractFrom(n.remainingResources, podData.Requests)
@@ -125,4 +140,9 @@ func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements sched
 	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
 	n.HostPortUsage().Add(pod, scheduling.GetHostPorts(pod))
 	n.VolumeUsage().Add(pod, volumes)
+
+	// Commit DRA allocation if present.
+	if draAllocation != nil {
+		draAllocation.Commit()
+	}
 }

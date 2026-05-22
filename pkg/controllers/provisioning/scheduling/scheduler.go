@@ -31,6 +31,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/multierr"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/klog/v2"
@@ -46,6 +47,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -125,6 +127,8 @@ func NewScheduler(
 	recorder events.Recorder,
 	clock clock.Clock,
 	volumeReqsByPod map[types.UID]scheduling.Requirements,
+	draAllocator *dynamicresources.Allocator,
+	claimsByKey map[types.NamespacedName]*resourcev1.ResourceClaim,
 	opts ...Options,
 ) *Scheduler {
 	minValuesPolicy := option.Resolve(opts...).minValuesPolicy
@@ -178,6 +182,8 @@ func NewScheduler(
 		preferencePolicy:        option.Resolve(opts...).preferencePolicy,
 		minValuesPolicy:         minValuesPolicy,
 		numConcurrentReconciles: lo.Ternary(option.Resolve(opts...).numConcurrentReconciles > 0, option.Resolve(opts...).numConcurrentReconciles, 1),
+		draAllocator:            draAllocator,
+		claimsByKey:             claimsByKey,
 	}
 	s.calculateExistingNodeClaims(ctx, stateNodes, daemonSetPods)
 	return s
@@ -188,7 +194,8 @@ type PodData struct {
 	Requirements             scheduling.Requirements
 	StrictRequirements       scheduling.Requirements
 	HasResourceClaimRequests bool
-	VolumeRequirements       scheduling.Requirements // Volume topology requirements
+	Claims                   []*resourcev1.ResourceClaim // resolved ResourceClaims for DRA
+	VolumeRequirements       scheduling.Requirements     // Volume topology requirements
 }
 
 type Scheduler struct {
@@ -212,6 +219,8 @@ type Scheduler struct {
 	preferencePolicy        PreferencePolicy
 	minValuesPolicy         karpopts.MinValuesPolicy
 	numConcurrentReconciles int
+	draAllocator            *dynamicresources.Allocator
+	claimsByKey             map[types.NamespacedName]*resourcev1.ResourceClaim
 }
 
 // DRAError indicates a pod will not be attempted to be scheduled because it has Dynamic Resource Allocation requirements
@@ -481,18 +490,54 @@ func (s *Scheduler) updateCachedPodData(p *corev1.Pod) {
 		// preferred node affinity.  Only required node affinities can actually reduce pod domains.
 		strictRequirements = scheduling.NewStrictPodRequirements(p)
 	}
+	hasDRA := pod.HasDRARequirements(p)
+	var claims []*resourcev1.ResourceClaim
+	if hasDRA && s.claimsByKey != nil {
+		claims = s.resolveClaimsForPod(p)
+	}
 	s.cachedPodData[p.UID] = &PodData{
 		Requests:                 resources.RequestsForPods(p),
 		Requirements:             requirements,
 		StrictRequirements:       strictRequirements,
-		HasResourceClaimRequests: pod.HasDRARequirements(p),
+		HasResourceClaimRequests: hasDRA,
+		Claims:                   claims,
 		VolumeRequirements:       s.volumeReqsByPod[p.UID], // Volume requirements
 	}
 }
 
+// resolveClaimsForPod resolves the ResourceClaim objects referenced by a pod.
+// Claims are looked up from the bulk-fetched claimsByKey index.
+func (s *Scheduler) resolveClaimsForPod(p *corev1.Pod) []*resourcev1.ResourceClaim {
+	var claims []*resourcev1.ResourceClaim
+	seen := map[string]bool{}
+	for _, prc := range p.Spec.ResourceClaims {
+		var claimName string
+		if prc.ResourceClaimName != nil {
+			claimName = *prc.ResourceClaimName
+		} else {
+			// Template-based claim: look up the generated name from pod status.
+			for _, s := range p.Status.ResourceClaimStatuses {
+				if s.Name == prc.Name && s.ResourceClaimName != nil {
+					claimName = *s.ResourceClaimName
+					break
+				}
+			}
+		}
+		if claimName == "" || seen[claimName] {
+			continue
+		}
+		seen[claimName] = true
+		if claim, ok := s.claimsByKey[types.NamespacedName{Namespace: p.Namespace, Name: claimName}]; ok {
+			claims = append(claims, claim)
+		}
+	}
+	return claims
+}
+
 func (s *Scheduler) add(ctx context.Context, pod *corev1.Pod) error {
 	// Check if pod has DRA requirements - if so, return DRA error when IgnoreDRARequests is enabled
-	if s.cachedPodData[pod.UID].HasResourceClaimRequests && karpopts.FromContext(ctx).IgnoreDRARequests {
+	// and no DRA allocator is configured.
+	if s.cachedPodData[pod.UID].HasResourceClaimRequests && karpopts.FromContext(ctx).IgnoreDRARequests && s.draAllocator == nil {
 		return NewDRAError(fmt.Errorf("pod has Dynamic Resource Allocation requirements that are not yet supported by Karpenter"))
 	}
 
@@ -523,6 +568,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 
 	var existingNode *ExistingNode
 	var requirements scheduling.Requirements
+	var draAlloc dynamicresources.Allocation
 
 	// determine the volumes that will be mounted if the pod schedules
 	volumes, err := scheduling.GetVolumes(ctx, s.kubeClient, pod)
@@ -530,7 +576,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 		return err
 	}
 	parallelizeUntil(s.numConcurrentReconciles, len(s.existingNodes), func(i int) bool {
-		r, err := s.existingNodes[i].CanAdd(pod, s.cachedPodData[pod.UID], volumes)
+		r, da, err := s.existingNodes[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.draAllocator)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -541,6 +587,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 			}
 			existingNode = s.existingNodes[i]
 			requirements = r
+			draAlloc = da
 			idx = i
 			return false
 		}
@@ -548,7 +595,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 	})
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
-		existingNode.Add(pod, s.cachedPodData[pod.UID], requirements, volumes)
+		existingNode.Add(pod, s.cachedPodData[pod.UID], requirements, volumes, draAlloc)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to existing nodes")
@@ -562,8 +609,9 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var updatedRequirements scheduling.Requirements
 	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
+	var inflightDRAAlloc dynamicresources.Allocation
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
-		r, its, ofr, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false)
+		r, its, ofr, da, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false, s.draAllocator)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -576,13 +624,14 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 			updatedRequirements = r
 			updatedInstanceTypes = its
 			offeringsToReserve = ofr
+			inflightDRAAlloc = da
 			idx = i
 			return false
 		}
 		return true
 	})
 	if inflightNodeClaim != nil {
-		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve)
+		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve, inflightDRAAlloc, s.draAllocator)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
@@ -597,6 +646,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	var updatedRequirements scheduling.Requirements
 	var updatedInstanceTypes []*cloudprovider.InstanceType
 	var offeringsToReserve []*cloudprovider.Offering
+	var newDRAAlloc dynamicresources.Allocation
 
 	errs := make([]error, len(s.nodeClaimTemplates))
 	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
@@ -622,7 +672,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
-		r, its, ofs, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort)
+		r, its, ofs, da, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.draAllocator)
 		if err != nil {
 			errs[i] = err
 
@@ -670,12 +720,13 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		updatedRequirements = r
 		updatedInstanceTypes = its
 		offeringsToReserve = ofs
+		newDRAAlloc = da
 		idx = i
 		return false
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve)
+		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve, newDRAAlloc, s.draAllocator)
 		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
