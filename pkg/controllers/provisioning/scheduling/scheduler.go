@@ -606,12 +606,9 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var mu sync.Mutex
 
 	var inflightNodeClaim *NodeClaim
-	var updatedRequirements scheduling.Requirements
-	var updatedInstanceTypes []*cloudprovider.InstanceType
-	var offeringsToReserve []*cloudprovider.Offering
-	var inflightDRAAlloc dynamicresources.Allocation
+	var inflightResult *CanAddResult
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
-		r, its, ofr, da, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false, s.draAllocator)
+		result, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false, s.draAllocator)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -621,17 +618,14 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 				return false
 			}
 			inflightNodeClaim = s.newNodeClaims[i]
-			updatedRequirements = r
-			updatedInstanceTypes = its
-			offeringsToReserve = ofr
-			inflightDRAAlloc = da
+			inflightResult = result
 			idx = i
 			return false
 		}
 		return true
 	})
 	if inflightNodeClaim != nil {
-		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve, inflightDRAAlloc, s.draAllocator)
+		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], inflightResult, s.draAllocator)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
@@ -643,10 +637,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	var mu sync.Mutex
 
 	var newNodeClaim *NodeClaim
-	var updatedRequirements scheduling.Requirements
-	var updatedInstanceTypes []*cloudprovider.InstanceType
-	var offeringsToReserve []*cloudprovider.Offering
-	var newDRAAlloc dynamicresources.Allocation
+	var newResult *CanAddResult
 
 	errs := make([]error, len(s.nodeClaimTemplates))
 	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
@@ -672,7 +663,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 			}
 		}
 		nodeClaim := NewNodeClaim(s.nodeClaimTemplates[i], s.topology, s.daemonOverhead[s.nodeClaimTemplates[i]], s.daemonHostPortUsage[s.nodeClaimTemplates[i]], its, s.reservationManager, s.reservedOfferingMode)
-		r, its, ofs, da, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.draAllocator)
+		result, err := nodeClaim.CanAdd(ctx, pod, s.cachedPodData[pod.UID], s.minValuesPolicy == karpopts.MinValuesPolicyBestEffort, s.draAllocator)
 		if err != nil {
 			errs[i] = err
 
@@ -688,9 +679,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 					return false
 				}
 				newNodeClaim = nil
-				updatedRequirements = nil
-				updatedInstanceTypes = nil
-				offeringsToReserve = nil
+				newResult = nil
 				idx = i
 				return false
 			}
@@ -706,7 +695,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		}
 
 		_, minValuesRelaxed := lo.Find(nodeClaim.Requirements.Keys().UnsortedList(), func(k string) bool {
-			updated := r.Get(k).MinValues
+			updated := result.Requirements.Get(k).MinValues
 			original := nodeClaim.Requirements.Get(k).MinValues
 			return original != nil && updated != nil && lo.FromPtr(updated) < lo.FromPtr(original)
 		})
@@ -717,16 +706,13 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 		}
 
 		newNodeClaim = nodeClaim
-		updatedRequirements = r
-		updatedInstanceTypes = its
-		offeringsToReserve = ofs
-		newDRAAlloc = da
+		newResult = result
 		idx = i
 		return false
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], updatedRequirements, updatedInstanceTypes, offeringsToReserve, newDRAAlloc, s.draAllocator)
+		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], newResult, s.draAllocator)
 		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil

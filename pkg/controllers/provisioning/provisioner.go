@@ -35,6 +35,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/workqueue"
@@ -49,6 +50,7 @@ import (
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -88,31 +90,13 @@ type Provisioner struct {
 	recorder                  events.Recorder
 	cm                        *pretty.ChangeMonitor
 	clock                     clock.Clock
-	deviceAllocationController DeviceAllocationController
-}
-
-// DeviceAllocationController is the interface for querying allocated device state.
-type DeviceAllocationController interface {
-	AllocatedDevices(ctx context.Context) (func(func(cloudprovider.DeviceID, DeviceAllocationMetadata) bool), error)
-}
-
-// DeviceAllocationMetadata mirrors deviceallocation.Metadata for the provisioner's use.
-type DeviceAllocationMetadata struct {
-	Releasable bool
-	Consumers  []DeviceConsumerRef
-}
-
-// DeviceConsumerRef identifies a consumer of a ResourceClaim.
-type DeviceConsumerRef struct {
-	UID       types.UID
-	Name      string
-	Namespace string
+	deviceAllocationController *deviceallocation.Controller
 }
 
 func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
 	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
 	clock clock.Clock,
-	deviceAllocationController DeviceAllocationController,
+	deviceAllocationController *deviceallocation.Controller,
 ) *Provisioner {
 	p := &Provisioner{
 		batcher:                    NewBatcher[types.UID](clock),
@@ -660,6 +644,8 @@ func (p *Provisioner) buildDRAState(
 	}
 
 	// Fetch in-cluster ResourceSlices, filtering out slices owned by deleting nodes.
+	// Ownership is determined via metadata.ownerReferences (not spec.nodeName, which
+	// indicates accessibility rather than ownership).
 	sliceList := &resourcev1.ResourceSliceList{}
 	if err := p.kubeClient.List(ctx, sliceList); err != nil {
 		return nil, nil, fmt.Errorf("listing resource slices, %w", err)
@@ -667,7 +653,7 @@ func (p *Provisioner) buildDRAState(
 	var inClusterSlices []dynamicresources.ResourceSlice
 	for i := range sliceList.Items {
 		s := &sliceList.Items[i]
-		if s.Spec.NodeName != nil && *s.Spec.NodeName != "" && deletingNodeNames.Has(*s.Spec.NodeName) {
+		if ownedByDeletingNode(s.OwnerReferences, deletingNodeNames) {
 			continue
 		}
 		inClusterSlices = append(inClusterSlices, dynamicresources.NewAPIServerSlice(s))
@@ -679,13 +665,12 @@ func (p *Provisioner) buildDRAState(
 		return nil, nil, fmt.Errorf("getting allocated devices, %w", err)
 	}
 	allocatedDevices := sets.New[cloudprovider.DeviceID]()
-	allocatedDeviceIter(func(id cloudprovider.DeviceID, meta DeviceAllocationMetadata) bool {
+	for id, meta := range allocatedDeviceIter {
 		if meta.Releasable && allConsumersDeleting(meta.Consumers, deletingPodUIDs) {
-			return true // skip — device will be freed
+			continue // skip — device will be freed
 		}
 		allocatedDevices.Insert(id)
-		return true
-	})
+	}
 
 	// Build attribute bindings from instance types grouped by NodePool.
 	attributeBindings := dynamicresources.BuildAttributeBindings(instanceTypes)
@@ -706,15 +691,23 @@ func (p *Provisioner) buildDRAState(
 	return allocator, claimsByKey, nil
 }
 
-// allConsumersDeleting returns true if all consumers are pods that are being deleted.
-func allConsumersDeleting(consumers []DeviceConsumerRef, deletingPodUIDs sets.Set[types.UID]) bool {
-	if len(consumers) == 0 {
-		return false
-	}
+// allConsumersDeleting returns true if all consumers are pods that are being deleted,
+// or if there are no consumers (the device is unowned and can be freely reallocated).
+func allConsumersDeleting(consumers []deviceallocation.ConsumerRef, deletingPodUIDs sets.Set[types.UID]) bool {
 	for _, c := range consumers {
 		if !deletingPodUIDs.Has(c.UID) {
 			return false
 		}
 	}
 	return true
+}
+
+// ownedByDeletingNode returns true if any owner reference is a Node whose name is in deletingNodeNames.
+func ownedByDeletingNode(ownerRefs []metav1.OwnerReference, deletingNodeNames sets.Set[string]) bool {
+	for _, ref := range ownerRefs {
+		if ref.Kind == "Node" && deletingNodeNames.Has(ref.Name) {
+			return true
+		}
+	}
+	return false
 }

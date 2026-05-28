@@ -512,7 +512,7 @@ When the scheduler prunes an instance type from a NodeClaim's candidate set, `Re
 At scheduler construction (`NewScheduler`), build the DRA allocator:
 
 1. **Collect and filter in-cluster ResourceSlices**: Gather all `ResourceSlice` objects from the cluster. Filter out slices owned by nodes that are not in the stateNode set passed to the scheduler (i.e., deleting nodes, disruption candidates). Non-node-owned slices (no node owner reference) are always included. This filtering uses `metadata.ownerReferences` to determine node ownership — `spec.nodeName` indicates accessibility, not ownership.
-2. Obtain the set of allocated devices from the `deviceallocation` controller's tracking state, filtered for deleting pods. Deleting pods should include all pods on deleting nodes and disruption candidates.
+2. Obtain the set of allocated devices from the `deviceallocation` controller's tracking state, filtered for deleting pods. The `deviceallocation.Controller` is injected directly into the provisioner (not accessed through an interface). Devices with no consumers (unowned) are treated as releasable. Deleting pods should include all pods on deleting nodes and disruption candidates.
 3. Build `AttributeBindings` from instance type metadata grouped by NodePool.
 4. Construct the `Allocator` with the filtered slice set, allocated device set, empty `inFlightAllocatedDevices`, empty `claimAllocations`, empty `poolCache`, and empty `celCache`.
 
@@ -536,7 +536,7 @@ For existing (initialized) nodes:
 1. The NodeClaim wraps a real node with a known instance type.
 2. `NodeClaim.ResourceSlices()` returns an empty map — all published slices are already in the allocator's in-cluster pool set.
 3. Call `Allocator.Allocate(ctx, nodeClaim, pod.ResourceClaims)`.
-4. If allocation succeeds, the pod can be placed. The `AllocationResult.Allocation` is held until `Add()` is called.
+4. If allocation succeeds, the pod can be placed. The `AllocationResult.Allocation` is held until `Add()` is called. **Note**: `AllocationResult.Requirements` are **not** merged into the existing node's requirements — existing node requirements are immutable (already set in stone). The allocator validates compatibility internally; if claims could not be satisfied with the node's requirements, the allocation would have failed.
 5. On `Add()`, call `Allocator.Commit()` to mark the devices as consumed.
 
 For pre-initialized nodes (existing but not yet fully initialized):

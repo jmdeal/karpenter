@@ -115,7 +115,9 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 	}
 	nodeRequirements.Add(topologyRequirements.Values()...)
 
-	// Check DRA device availability
+	// Check DRA device availability.
+	// Existing node requirements are immutable — the allocator validates compatibility
+	// internally, so we only need the allocation handle, not the topology requirements.
 	var draAlloc dynamicresources.Allocation
 	if draAllocator != nil && len(podData.Claims) > 0 {
 		adapter := newExistingNodeDRAAdapter(n)
@@ -123,7 +125,6 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 		if draErr != nil {
 			return nil, nil, fmt.Errorf("DRA allocation failed, %w", draErr)
 		}
-		nodeRequirements.Add(draResult.Requirements.Values()...)
 		draAlloc = draResult.Allocation
 	}
 
