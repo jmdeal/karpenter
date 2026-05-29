@@ -133,7 +133,7 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 
 // Add updates the ExistingNode to schedule the pod to this ExistingNode, updating
 // the ExistingNode with new requirements and volumes based on the pod scheduling
-func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes, draAllocation dynamicresources.Allocation) {
+func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod, podData *PodData, nodeRequirements scheduling.Requirements, volumes scheduling.Volumes, draAllocation dynamicresources.Allocation) {
 	// Update node
 	n.Pods = append(n.Pods, pod)
 	resources.SubtractFrom(n.remainingResources, podData.Requests)
@@ -144,6 +144,6 @@ func (n *ExistingNode) Add(pod *v1.Pod, podData *PodData, nodeRequirements sched
 
 	// Commit DRA allocation if present.
 	if draAllocation != nil {
-		draAllocation.Commit()
+		draAllocation.Commit(ctx)
 	}
 }

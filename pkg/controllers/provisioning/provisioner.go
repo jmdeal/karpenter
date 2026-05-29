@@ -52,12 +52,12 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	scheduler "sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
-	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	"sigs.k8s.io/karpenter/pkg/events"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/daemonset"
 	nodeutils "sigs.k8s.io/karpenter/pkg/utils/node"
 	nodepoolutils "sigs.k8s.io/karpenter/pkg/utils/nodepool"
@@ -82,19 +82,22 @@ func WithReason(reason string) func(*LaunchOptions) {
 
 // Provisioner waits for enqueued pods, batches them, creates capacity and binds the pods to the capacity.
 type Provisioner struct {
-	cloudProvider             cloudprovider.CloudProvider
-	kubeClient                client.Client
-	batcher                   *Batcher[types.UID]
-	volumeTopology            *scheduler.VolumeTopology
-	cluster                   *state.Cluster
-	recorder                  events.Recorder
-	cm                        *pretty.ChangeMonitor
-	clock                     clock.Clock
+	cloudProvider              cloudprovider.CloudProvider
+	kubeClient                 client.Client
+	batcher                    *Batcher[types.UID]
+	volumeTopology             *scheduler.VolumeTopology
+	cluster                    *state.Cluster
+	recorder                   events.Recorder
+	cm                         *pretty.ChangeMonitor
+	clock                      clock.Clock
 	deviceAllocationController *deviceallocation.Controller
 }
 
-func NewProvisioner(kubeClient client.Client, recorder events.Recorder,
-	cloudProvider cloudprovider.CloudProvider, cluster *state.Cluster,
+func NewProvisioner(
+	kubeClient client.Client,
+	recorder events.Recorder,
+	cloudProvider cloudprovider.CloudProvider,
+	cluster *state.Cluster,
 	clock clock.Clock,
 	deviceAllocationController *deviceallocation.Controller,
 ) *Provisioner {

@@ -310,9 +310,9 @@ var _ = Describe("Allocator", func() {
 
 		It("should skip already-allocated devices", func() {
 			allocated := sets.New[cloudprovider.DeviceID](
-				deviceID("gpu.example.com", "pool-a", "gpu-0"),
-				deviceID("gpu.example.com", "pool-a", "gpu-1"),
-				deviceID("gpu.example.com", "pool-a", "gpu-2"),
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID,
+				deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID,
+				deviceID("gpu.example.com", "pool-a", "gpu-2").DeviceID,
 			)
 			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
 			nc := makeNodeClaim("it-1")
@@ -324,8 +324,8 @@ var _ = Describe("Allocator", func() {
 
 		It("should allocate remaining devices when some are already allocated", func() {
 			allocated := sets.New[cloudprovider.DeviceID](
-				deviceID("gpu.example.com", "pool-a", "gpu-0"),
-				deviceID("gpu.example.com", "pool-a", "gpu-1"),
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID,
+				deviceID("gpu.example.com", "pool-a", "gpu-1").DeviceID,
 			)
 			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
 			nc := makeNodeClaim("it-1")
@@ -589,7 +589,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Second allocation: should only have 1 device left.
 			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 2))
@@ -608,7 +608,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 1))
 			result, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result.Allocation.Commit()
+			result.Allocation.Commit(ctx)
 
 			// Second allocation should succeed (uses cached pools).
 			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
@@ -670,7 +670,7 @@ var _ = Describe("Allocator", func() {
 					withGeneration(1, 1), withAPIDevices("gpu-0", "gpu-1")),
 			}
 			allocated := sets.New[cloudprovider.DeviceID](
-				deviceID("gpu.example.com", "pool-a", "gpu-0"),
+				deviceID("gpu.example.com", "pool-a", "gpu-0").DeviceID,
 			)
 			alloc = dynamicresources.NewAllocator(inClusterSlices, allocated, nil, env.Client)
 			nc := makeNodeClaim("it-1")
@@ -776,7 +776,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// NC-B should only see 1 remaining device.
 			ncB := makeNodeClaimWithID("nc-b", "it-1")
@@ -799,7 +799,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Same NC-A, but with IT-B: should be able to allocate the same in-cluster devices
 			// because only one IT will be provisioned.
@@ -818,7 +818,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on same NC-A/IT-A: only 1 device remains.
 			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 2))
@@ -846,7 +846,7 @@ var _ = Describe("Allocator", func() {
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(result1.InstanceTypes).To(HaveLen(2))
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// NC-B: devices used by NC-A (any IT) are blocked.
 			ncB := makeNodeClaimWithID("nc-b", "it-c")
@@ -874,7 +874,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// NC-B can't allocate — devices are reserved.
 			ncB := makeNodeClaimWithID("nc-b", "it-1")
@@ -905,7 +905,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result.Allocation.Commit()
+			result.Allocation.Commit(ctx)
 
 			// Release only it-a — it-b still holds the devices.
 			alloc.ReleaseInstanceType(unique.Make("nc-a"), unique.Make("it-a"))
@@ -1121,7 +1121,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2: same NC/IT, no devices left.
 			claim2 := makeClaim("c2", exactRequest("req-1", "gpu", 1))
@@ -1139,7 +1139,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("c1", exactRequest("req-1", "gpu", 2))
 			result1, err := alloc.Allocate(ctx, ncAITA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Same NC-A but IT-B has its own template devices.
 			ncAITB := makeNodeClaimWithTemplatesAndID("nc-a", "it-b",
@@ -1279,7 +1279,7 @@ var _ = Describe("Allocator", func() {
 							AttributeBindings: []*cloudprovider.AttributeBinding{
 								{
 									Attribute: "gpu.example.com/numa",
-									Devices:   []cloudprovider.DeviceID{devA, devB},
+									Devices:   []cloudprovider.DeviceID{devA.DeviceID, devB.DeviceID},
 								},
 							},
 						},
@@ -1745,7 +1745,7 @@ var _ = Describe("Allocator", func() {
 			inMemoryClaim := makeClaim("zonal-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{inMemoryClaim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Now: a pod references both the in-memory claim (zone A) and an in-cluster
 			// allocated claim pinned to zone B. These should be incompatible.
@@ -1786,7 +1786,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("shared-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, nc, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2: references the same claim (still unallocated in API, but in-memory allocated).
 			// Should succeed without re-running the DFS.
@@ -1808,7 +1808,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("shared-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B: same claim, should succeed since it used in-cluster devices only.
 			ncB := makeNodeClaimWithID("nc-b", "it-1")
@@ -1827,7 +1827,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("template-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B: same claim, should fail since it used template devices.
 			ncB := makeNodeClaimWithTemplatesAndID("nc-b", "it-2",
@@ -1848,7 +1848,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("template-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on same NC-A: should succeed.
 			result2, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
@@ -1882,7 +1882,7 @@ var _ = Describe("Allocator", func() {
 
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{inClusterClaim, templateClaim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B references only the in-cluster claim. Should succeed because
 			// that claim's devices are purely in-cluster (UsedTemplateDevices=false).
@@ -1924,7 +1924,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("zonal-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B: in-memory claim should propagate the zone requirement.
 			ncB := &fakeNodeClaim{
@@ -1964,7 +1964,7 @@ var _ = Describe("Allocator", func() {
 			claim := makeClaim("zonal-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B which only allows eu-west-1a: should fail.
 			ncB := &fakeNodeClaim{
@@ -2009,7 +2009,7 @@ var _ = Describe("Allocator", func() {
 			claim1 := makeClaim("zonal-claim", exactRequest("req-1", "gpu", 1))
 			result1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claim1})
 			Expect(err).ToNot(HaveOccurred())
-			result1.Allocation.Commit()
+			result1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B references the in-memory claim and an unallocated claim.
 			// The in-memory claim pins to us-west-2a, so the unallocated claim should only
@@ -2062,7 +2062,7 @@ var _ = Describe("Allocator", func() {
 			claimA := makeClaim("claim-zone-a", exactRequest("req-1", "gpu", 1))
 			r1, err := alloc.Allocate(ctx, ncA, []*resourcev1.ResourceClaim{claimA})
 			Expect(err).ToNot(HaveOccurred())
-			r1.Allocation.Commit()
+			r1.Allocation.Commit(ctx)
 
 			// Pod 2 on NC-B: allocate from zone B.
 			ncB := &fakeNodeClaim{
@@ -2073,7 +2073,7 @@ var _ = Describe("Allocator", func() {
 			claimB := makeClaim("claim-zone-b", exactRequest("req-1", "gpu", 1))
 			r2, err := alloc.Allocate(ctx, ncB, []*resourcev1.ResourceClaim{claimB})
 			Expect(err).ToNot(HaveOccurred())
-			r2.Allocation.Commit()
+			r2.Allocation.Commit(ctx)
 
 			// Pod 3 references both in-memory claims. Zone A and Zone B are incompatible.
 			ncC := &fakeNodeClaim{

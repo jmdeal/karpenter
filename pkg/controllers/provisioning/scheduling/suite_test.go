@@ -52,6 +52,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -103,7 +104,9 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock, nil)
+	draController := deviceallocation.NewController(env.Client)
+	draController.Hydrate(ctx)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock, draController)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
@@ -4874,7 +4877,9 @@ var _ = Context("Scheduling", func() {
 					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
 				},
 				Phase: corev1.PodPending,
-			}, false, true),
+			// With a real DRA controller, unresolvable claims (no ResourceClaim objects) are
+			// skipped, so the pod schedules normally without DRA errors.
+			}, true, false),
 			Entry("init container with resource claims", "init-container-dra", test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "dra-init-container-pod",
@@ -4906,7 +4911,7 @@ var _ = Context("Scheduling", func() {
 					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
 				},
 				Phase: corev1.PodPending,
-			}, false, true),
+			}, true, false),
 			Entry("pod with both container and init container resource claims", "both-dra", test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "dra-both-pod",
@@ -4941,7 +4946,7 @@ var _ = Context("Scheduling", func() {
 					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
 				},
 				Phase: corev1.PodPending,
-			}, false, true),
+			}, true, false),
 			Entry("non-DRA pod without resource claims", "non-dra", test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "non-dra-pod",

@@ -595,7 +595,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 	})
 	// If we set the existingNode to something valid, this means that we successfully scheduled to one of these nodes
 	if existingNode != nil {
-		existingNode.Add(pod, s.cachedPodData[pod.UID], requirements, volumes, draAlloc)
+		existingNode.Add(ctx, pod, s.cachedPodData[pod.UID], requirements, volumes, draAlloc)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to existing nodes")
@@ -606,7 +606,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 	var mu sync.Mutex
 
 	var inflightNodeClaim *NodeClaim
-	var inflightResult *CanAddResult
+	var inflightResult *NodeClaimAllocation
 	parallelizeUntil(s.numConcurrentReconciles, len(s.newNodeClaims), func(i int) bool {
 		result, err := s.newNodeClaims[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], false, s.draAllocator)
 		if err == nil {
@@ -625,7 +625,7 @@ func (s *Scheduler) addToInflightNode(ctx context.Context, pod *corev1.Pod) erro
 		return true
 	})
 	if inflightNodeClaim != nil {
-		inflightNodeClaim.Add(pod, s.cachedPodData[pod.UID], inflightResult, s.draAllocator)
+		inflightNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], inflightResult, s.draAllocator)
 		return nil
 	}
 	return fmt.Errorf("failed scheduling pod to inflight nodes")
@@ -637,7 +637,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	var mu sync.Mutex
 
 	var newNodeClaim *NodeClaim
-	var newResult *CanAddResult
+	var newResult *NodeClaimAllocation
 
 	errs := make([]error, len(s.nodeClaimTemplates))
 	parallelizeUntil(s.numConcurrentReconciles, len(s.nodeClaimTemplates), func(i int) bool {
@@ -712,7 +712,7 @@ func (s *Scheduler) addToNewNodeClaim(ctx context.Context, pod *corev1.Pod) erro
 	})
 	if newNodeClaim != nil {
 		// we will launch this nodeClaim and need to track its maximum possible resource usage against our remaining resources
-		newNodeClaim.Add(pod, s.cachedPodData[pod.UID], newResult, s.draAllocator)
+		newNodeClaim.Add(ctx, pod, s.cachedPodData[pod.UID], newResult, s.draAllocator)
 		s.newNodeClaims = append(s.newNodeClaims, newNodeClaim)
 		s.remainingResources[newNodeClaim.NodePoolName] = subtractMax(s.remainingResources[newNodeClaim.NodePoolName], newNodeClaim.InstanceTypeOptions)
 		return nil
