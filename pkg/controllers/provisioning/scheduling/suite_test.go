@@ -38,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
@@ -51,6 +52,7 @@ import (
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider/fake"
+	"sigs.k8s.io/karpenter/pkg/controllers/dynamicresources/deviceallocation"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning"
 	"sigs.k8s.io/karpenter/pkg/controllers/provisioning/scheduling"
 	"sigs.k8s.io/karpenter/pkg/controllers/state"
@@ -102,7 +104,9 @@ var _ = BeforeSuite(func() {
 	nodeStateController = informer.NewNodeController(env.Client, cluster)
 	nodeClaimStateController = informer.NewNodeClaimController(env.Client, cloudProvider, cluster, clusterCost)
 	podStateController = informer.NewPodController(env.Client, cluster)
-	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+	draController := deviceallocation.NewController(env.Client)
+	draController.Hydrate(ctx)
+	prov = provisioning.NewProvisioner(env.Client, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock, draController)
 	podController = provisioning.NewPodController(env.Client, prov, cluster)
 })
 
@@ -2053,7 +2057,7 @@ var _ = Context("Scheduling", func() {
 						return []string{o.(*corev1.Pod).Spec.NodeName}
 					},
 				).Build()
-				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock)
+				provisioner := provisioning.NewProvisioner(kubeClient, events.NewRecorder(&record.FakeRecorder{}), cloudProvider, cluster, fakeClock, nil)
 				controller := informer.NewNodeController(kubeClient, cluster)
 				// We try to provision a node for an initial unschedulable pod that will create nodeClaim and node bindings
 				ExpectApplied(ctx, kubeClient, nodePool)
@@ -4051,7 +4055,7 @@ var _ = Context("Scheduling", func() {
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
-			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
+			s, err := prov.NewScheduler(ctx, pods, nil, sets.Set[string]{}, sets.Set[types.UID]{}, scheduling.DisableReservedCapacityFallback)
 			Expect(err).To(BeNil())
 
 			var wg sync.WaitGroup
@@ -4123,7 +4127,7 @@ var _ = Context("Scheduling", func() {
 					},
 				},
 			}) // Create 1000 pods which should take long enough to schedule that we should be able to read the queueDepth metric with a value
-			s, err := prov.NewScheduler(ctx, pods, nil, scheduling.DisableReservedCapacityFallback)
+			s, err := prov.NewScheduler(ctx, pods, nil, sets.Set[string]{}, sets.Set[types.UID]{}, scheduling.DisableReservedCapacityFallback)
 			Expect(err).To(BeNil())
 			_, err = s.Solve(injection.WithControllerName(ctx, "provisioner"), pods)
 			Expect(err).To(BeNil())
@@ -4829,7 +4833,7 @@ var _ = Context("Scheduling", func() {
 				// Create the test pod with specified options
 				pod := test.Pod(podOptions)
 
-				scheduler, err := prov.NewScheduler(ctx, []*corev1.Pod{pod}, nil)
+				scheduler, err := prov.NewScheduler(ctx, []*corev1.Pod{pod}, nil, sets.Set[string]{}, sets.Set[types.UID]{})
 				Expect(err).ToNot(HaveOccurred())
 				results, err := scheduler.Solve(ctx, []*corev1.Pod{pod})
 				Expect(err).ToNot(HaveOccurred())
@@ -4873,7 +4877,9 @@ var _ = Context("Scheduling", func() {
 					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
 				},
 				Phase: corev1.PodPending,
-			}, false, true),
+			// With a real DRA controller, unresolvable claims (no ResourceClaim objects) are
+			// skipped, so the pod schedules normally without DRA errors.
+			}, true, false),
 			Entry("init container with resource claims", "init-container-dra", test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "dra-init-container-pod",
@@ -4905,7 +4911,7 @@ var _ = Context("Scheduling", func() {
 					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
 				},
 				Phase: corev1.PodPending,
-			}, false, true),
+			}, true, false),
 			Entry("pod with both container and init container resource claims", "both-dra", test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "dra-both-pod",
@@ -4940,7 +4946,7 @@ var _ = Context("Scheduling", func() {
 					{Type: corev1.PodScheduled, Reason: corev1.PodReasonUnschedulable, Status: corev1.ConditionFalse},
 				},
 				Phase: corev1.PodPending,
-			}, false, true),
+			}, true, false),
 			Entry("non-DRA pod without resource claims", "non-dra", test.PodOptions{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "non-dra-pod",
@@ -4992,7 +4998,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler1 := scheduling.NewScheduler(ctx1, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology1,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil, nil, nil)
 			results1, err := scheduler1.Solve(ctx1, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results1.NewNodeClaims).To(HaveLen(1))
@@ -5005,7 +5011,7 @@ var _ = Context("Scheduling", func() {
 			Expect(err).ToNot(HaveOccurred())
 			scheduler2 := scheduling.NewScheduler(ctx2, env.Client, []*v1.NodePool{nodePool}, cluster, nil, topology2,
 				map[string][]*cloudprovider.InstanceType{nodePool.Name: cloudProvider.InstanceTypes},
-				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil)
+				[]*corev1.Pod{draDaemonPod}, events.NewRecorder(&record.FakeRecorder{}), fakeClock, nil, nil, nil)
 			results2, err := scheduler2.Solve(ctx2, []*corev1.Pod{appPod})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(results2.NewNodeClaims).To(HaveLen(1))

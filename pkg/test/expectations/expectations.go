@@ -259,6 +259,8 @@ func ExpectCleanedUp(ctx context.Context, c client.Client) {
 		&v1.NodeClaim{},
 		&v1alpha1.NodeOverlay{},
 		&resourcev1.ResourceClaim{},
+		&resourcev1.ResourceSlice{},
+		&resourcev1.DeviceClass{},
 	} {
 		for _, namespace := range namespaces.Items {
 			wg.Add(1)

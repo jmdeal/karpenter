@@ -21,12 +21,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	dracel "k8s.io/dynamic-resource-allocation/cel"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
@@ -60,15 +63,21 @@ type Allocator struct {
 }
 
 // NewAllocator constructs an Allocator for a single scheduling loop.
+// allocatedDevices contains the set of in-cluster devices that are already allocated;
+// these are converted internally to the scheduling DeviceID type.
 func NewAllocator(
 	inClusterSlices []ResourceSlice,
-	allocatedDevices sets.Set[DeviceID],
+	allocatedDevices sets.Set[cloudprovider.DeviceID],
 	attributeBindings AttributeBindings,
 	kubeClient client.Client,
 ) *Allocator {
+	converted := sets.New[DeviceID]()
+	for id := range allocatedDevices {
+		converted.Insert(DeviceID{DeviceID: id})
+	}
 	return &Allocator{
 		inClusterSlices:          inClusterSlices,
-		allocatedDevices:         allocatedDevices,
+		allocatedDevices:         converted,
 		inFlightAllocatedDevices: make(map[NodeClaimID]map[InstanceTypeID]sets.Set[DeviceID]),
 		inMemoryAllocations:      make(map[string]*ClaimAllocationMetadata),
 		attributeBindings:        attributeBindings,
@@ -90,20 +99,36 @@ type AllocationResult struct {
 
 // Allocation is the interface for committing a successful allocation to the Allocator's shared state.
 type Allocation interface {
-	Commit()
+	Commit(context.Context)
 }
 
 // allocation commits per-instance-type device allocations (both in-cluster and template).
 type allocation struct {
-	allocator           *Allocator
-	nodeClaimID         NodeClaimID
-	deviceIDsByIT       map[InstanceTypeID][]DeviceID
-	deviceIDsByClaimIT  map[int]map[InstanceTypeID][]DeviceID // per-claim, per-IT device IDs
-	pools               []*Pool
-	claimMetadata       map[string]*ClaimAllocationMetadata // per-claim metadata to record on commit
+	allocator          *Allocator
+	nodeClaimID        NodeClaimID
+	deviceIDsByIT      map[InstanceTypeID][]DeviceID
+	deviceIDsByClaimIT map[int]map[InstanceTypeID][]DeviceID // per-claim, per-IT device IDs
+	pools              []*Pool
+	claimMetadata      map[string]*ClaimAllocationMetadata // per-claim metadata to record on commit
 }
 
-func (a *allocation) Commit() {
+func (a *allocation) Commit(ctx context.Context) {
+	if log.FromContext(ctx).V(1).Enabled() {
+		type deviceID struct {
+			Driver       string
+			Pool         string
+			Device         string
+		}
+		log.FromContext(ctx).V(1).Info("allocated devices", "nodeClaimID", a.nodeClaimID.Value(), "deviceIDs", lo.MapEntries(a.deviceIDsByIT, func(itID InstanceTypeID, ids []DeviceID) (string, []deviceID) {
+			return itID.Value(), lo.Map(ids, func(id DeviceID, _ int) deviceID {
+				return deviceID{
+					Driver: id.Driver.Value(),
+					Pool: id.Pool.Value(),
+					Device: id.Device.Value(),
+				}
+			})
+		}))
+	}
 	for itID, deviceIDs := range a.deviceIDsByIT {
 		ncDevices, ok := a.allocator.inFlightAllocatedDevices[a.nodeClaimID]
 		if !ok {
@@ -284,9 +309,12 @@ func (a *Allocator) Allocate(
 				templateDevicesByIT[itID] = append(templateDevicesByIT[itID], DeviceWithID{
 					Device: d,
 					ID: DeviceID{
-						Driver: s.Driver(),
-						Pool:   s.Pool().Name,
-						Device: d.Name,
+						DeviceID: cloudprovider.DeviceID{
+							Driver: s.Driver(),
+							Pool:   s.Pool().Name,
+							Device: d.Name,
+						},
+						Template: true,
 					},
 				})
 			}
@@ -327,20 +355,13 @@ func (a *Allocator) Allocate(
 	result.Requirements.Add(baselineReqs.Values()...)
 
 	// Build per-claim metadata for newly allocated claims.
-	// Build a lookup set of template device IDs for UsedTemplateDevices detection.
-	templateDeviceIDs := sets.New[DeviceID]()
-	for _, devices := range templateDevicesByIT {
-		for _, d := range devices {
-			templateDeviceIDs.Insert(d.ID)
-		}
-	}
 	alloc := result.Allocation.(*allocation)
 	for i, claim := range unallocatedClaims {
 		usedTemplate := false
 		if claimITs, ok := alloc.deviceIDsByClaimIT[i]; ok {
 			for _, ids := range claimITs {
 				for _, id := range ids {
-					if templateDeviceIDs.Has(id) {
+					if id.Template {
 						usedTemplate = true
 						break
 					}
@@ -637,7 +658,13 @@ func (a *allocator) isDeviceAllocated(deviceID DeviceID) bool {
 				return true
 			}
 		} else {
-			// Different NC: blocked if any IT allocated this device.
+			// Different NC: blocked if any IT allocated this device, but only for
+			// in-cluster devices. Template devices are instantiated per-NodeClaim,
+			// so allocating a template device on one NC does not block the same
+			// device on another NC.
+			if a.isTemplateDevice(deviceID) {
+				continue
+			}
 			for _, itDevices := range ncDevices {
 				if itDevices.Has(deviceID) {
 					return true
@@ -646,6 +673,11 @@ func (a *allocator) isDeviceAllocated(deviceID DeviceID) bool {
 		}
 	}
 	return false
+}
+
+// isTemplateDevice returns true if the given device ID corresponds to a template device.
+func (a *allocator) isTemplateDevice(deviceID DeviceID) bool {
+	return deviceID.Template
 }
 
 // restoreState resets the child allocator's mutable DFS state for a new IT attempt.

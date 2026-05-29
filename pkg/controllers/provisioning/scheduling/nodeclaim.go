@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"unique"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
@@ -29,10 +30,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	opts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
 
@@ -79,6 +82,14 @@ func (e ReservedOfferingError) Unwrap() error {
 	return e.error
 }
 
+// NodeClaimAllocation contains the results of a successful CanAdd evaluation for a NodeClaim.
+type NodeClaimAllocation struct {
+	Requirements               scheduling.Requirements
+	InstanceTypes              []*cloudprovider.InstanceType
+	OfferingsToReserve         []*cloudprovider.Offering
+	DynamicResourcesAllocation dynamicresources.Allocation
+}
+
 var nodeID int64
 
 func NewNodeClaim(
@@ -111,23 +122,23 @@ func NewNodeClaim(
 
 // CanAdd returns whether the pod can be added to the NodeClaim
 // based on the taints/tolerations, host port compatibility,
-// requirements, resources, reserved capacity reservations, and topology requirements
-func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool) (updatedRequirements scheduling.Requirements, updatedInstanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering, err error) {
+// requirements, resources, reserved capacity reservations, topology requirements, and DRA device availability
+func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodData, relaxMinValues bool, draAllocator *dynamicresources.Allocator) (*NodeClaimAllocation, error) {
 	// Check Taints
 	if err := scheduling.Taints(n.Spec.Taints).ToleratesPod(pod); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// exposed host ports on the node
 	hostPorts := scheduling.GetHostPorts(pod)
 	if err := n.hostPortUsage.Conflicts(pod, hostPorts); err != nil {
-		return nil, nil, nil, fmt.Errorf("checking host port usage, %w", err)
+		return nil, fmt.Errorf("checking host port usage, %w", err)
 	}
 	nodeClaimRequirements := scheduling.NewRequirements(n.Requirements.Values()...)
 
 	// Check NodeClaim Affinity Requirements
 	if err := nodeClaimRequirements.Compatible(podData.Requirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, fmt.Errorf("incompatible requirements, %w", err)
+		return nil, fmt.Errorf("incompatible requirements, %w", err)
 	}
 	nodeClaimRequirements.Add(podData.Requirements.Values()...)
 
@@ -135,7 +146,7 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// This ensures NodeClaim is created in the correct zone for volumes,
 	// while TSC counting uses pod's original affinity.
 	if err := addVolumeRequirements(nodeClaimRequirements, podData.VolumeRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 
 	// Check Topology Requirements
@@ -143,10 +154,10 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	// ensuring TSC counting uses pod's original affinity.
 	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
@@ -163,30 +174,98 @@ func (n *NodeClaim) CanAdd(ctx context.Context, pod *corev1.Pod, podData *PodDat
 	if err != nil {
 		// We avoid wrapping this err because calling String() on InstanceTypeFilterError is an expensive operation
 		// due to calls to resources.Merge and stringifying the nodeClaimRequirements
-		return nil, nil, nil, err
+		return nil, err
 	}
+
+	// Check DRA device availability
+	var draAlloc dynamicresources.Allocation
+	if draAllocator != nil && len(podData.Claims) > 0 {
+		adapter := newNodeClaimDRAAdapter(n.hostname, n.NodePoolName, nodeClaimRequirements, remaining)
+		draResult, draErr := draAllocator.Allocate(ctx, adapter, podData.Claims)
+		if draErr != nil {
+			return nil, fmt.Errorf("DRA allocation failed, %w", draErr)
+		}
+		// Merge DRA topology requirements.
+		nodeClaimRequirements.Add(draResult.Requirements.Values()...)
+		// Filter instance types to those that survived DRA allocation.
+		survivingITs := sets.New[string]()
+		for _, itID := range draResult.InstanceTypes {
+			survivingITs.Insert(itID.Value())
+		}
+		remaining = lo.Filter(remaining, func(it *cloudprovider.InstanceType, _ int) bool {
+			return survivingITs.Has(it.Name)
+		})
+		if len(remaining) == 0 {
+			return nil, fmt.Errorf("no instance types remaining after DRA allocation")
+		}
+		// Re-filter by the tightened requirements (DRA may have eliminated zones/offerings).
+		remaining, _, err = filterInstanceTypesByRequirements(remaining, nodeClaimRequirements, podData.Requests, n.daemonResources, requests, relaxMinValues)
+		if err != nil {
+			return nil, err
+		}
+		draAlloc = draResult.Allocation
+	}
+
 	ofs, err := n.offeringsToReserve(ctx, remaining, nodeClaimRequirements)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	return nodeClaimRequirements, remaining, ofs, nil
+	return &NodeClaimAllocation{
+		Requirements:               nodeClaimRequirements,
+		InstanceTypes:              remaining,
+		OfferingsToReserve:         ofs,
+		DynamicResourcesAllocation: draAlloc,
+	}, nil
 }
 
 // Add updates the NodeClaim to schedule the pod to this NodeClaim, updating
 // the NodeClaim with new requirements, instance types, and offerings to reserve
 // based on the pod scheduling
-func (n *NodeClaim) Add(pod *corev1.Pod, podData *PodData, nodeClaimRequirements scheduling.Requirements, instanceTypes []*cloudprovider.InstanceType, offeringsToReserve []*cloudprovider.Offering) {
+func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, allocation *NodeClaimAllocation, draAllocator *dynamicresources.Allocator) {
+	// Snapshot pre-add instance types for DRA release tracking.
+	previousITs := n.InstanceTypeOptions
+
 	// Update node
 	n.Pods = append(n.Pods, pod)
-	n.InstanceTypeOptions = instanceTypes
+	n.InstanceTypeOptions = allocation.InstanceTypes
 	n.Spec.Resources.Requests = resources.Merge(n.Spec.Resources.Requests, podData.Requests)
-	n.Requirements = nodeClaimRequirements
+	n.Requirements = allocation.Requirements
 	n.topology.Register(corev1.LabelHostname, n.hostname)
-	n.topology.Record(pod, n.Spec.Taints, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	n.topology.Record(pod, n.Spec.Taints, allocation.Requirements, scheduling.AllowUndefinedWellKnownLabels)
 	n.hostPortUsage.Add(pod, scheduling.GetHostPorts(pod))
-	n.reservationManager.Reserve(n.hostname, offeringsToReserve...)
-	n.releaseReservedOfferings(n.reservedOfferings, offeringsToReserve)
-	n.reservedOfferings = offeringsToReserve
+	n.reservationManager.Reserve(n.hostname, allocation.OfferingsToReserve...)
+	n.releaseReservedOfferings(n.reservedOfferings, allocation.OfferingsToReserve)
+	n.reservedOfferings = allocation.OfferingsToReserve
+
+	// Commit DRA allocation and release pruned instance types.
+	if allocation.DynamicResourcesAllocation != nil {
+		allocation.DynamicResourcesAllocation.Commit(ctx)
+	}
+	if draAllocator != nil {
+		releasePrunedInstanceTypes(ctx, draAllocator, n.hostname, previousITs, allocation.InstanceTypes)
+	}
+}
+
+// releasePrunedInstanceTypes notifies the DRA allocator of any instance types that were
+// removed during this Add() call, so their device reservations can be freed.
+func releasePrunedInstanceTypes(ctx context.Context, allocator *dynamicresources.Allocator, hostname string, previousITs, currentITs []*cloudprovider.InstanceType) {
+	currentNames := sets.New[string]()
+	for _, it := range currentITs {
+		currentNames.Insert(it.Name)
+	}
+	var releasedITs []string
+	ncID := unique.Make(hostname)
+	for _, it := range previousITs {
+		if !currentNames.Has(it.Name) {
+			allocator.ReleaseInstanceType(ncID, unique.Make(it.Name))
+			if log.FromContext(ctx).V(1).Enabled() {
+				releasedITs = append(releasedITs, it.Name)
+			}
+		}
+	}
+	if len(releasedITs) != 0 {
+		log.FromContext(ctx).V(1).Info("released allocations for instance types", "nodeClaimID", hostname, "instanceTypes", releasedITs)
+	}
 }
 
 // releaseReservedOfferings releases all offerings which are present in the current reserved offerings, but are not

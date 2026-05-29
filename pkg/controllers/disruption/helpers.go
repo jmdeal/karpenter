@@ -23,6 +23,7 @@ import (
 
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -103,6 +104,8 @@ func SimulateScheduling(ctx context.Context, kubeClient client.Client, cluster *
 		log.IntoContext(ctx, operatorlogging.NopLogger),
 		pods,
 		stateNodes,
+		sets.Set[string]{},
+		sets.Set[types.UID]{},
 		opts...,
 	)
 	if err != nil {

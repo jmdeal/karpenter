@@ -35,8 +35,13 @@ type (
 	NodePoolID     = unique.Handle[string]
 )
 
-// DeviceID is an alias for cloudprovider.DeviceID.
-type DeviceID = cloudprovider.DeviceID
+// DeviceID wraps cloudprovider.DeviceID with scheduling-specific metadata.
+// Template indicates whether the device comes from a cloud provider template
+// (potential device) rather than an in-cluster published ResourceSlice.
+type DeviceID struct {
+	cloudprovider.DeviceID
+	Template bool
+}
 
 // NodeClaim abstracts over existing nodes, pre-initialized nodes, and in-flight NodeClaims
 // for the allocator. This allows the allocator to work uniformly regardless of the NodeClaim's

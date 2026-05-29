@@ -93,7 +93,11 @@ func NewControllers(
 	opts ...option.Function[ControllerOptions],
 ) []controller.Controller {
 	o := option.Resolve(opts...)
-	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock)
+	var deviceAllocationCtrl *deviceallocation.Controller
+	if !options.FromContext(ctx).IgnoreDRARequests {
+		deviceAllocationCtrl = deviceallocation.NewController(kubeClient)
+	}
+	p := provisioning.NewProvisioner(kubeClient, recorder, cloudProvider, cluster, clock, deviceAllocationCtrl)
 	evictionQueue := terminator.NewQueue(kubeClient, recorder)
 	disruptionQueue := disruption.NewQueue(kubeClient, recorder, cluster, clock, p)
 	npState := nodepoolhealth.NewState()
@@ -125,8 +129,8 @@ func NewControllers(
 		nodehydration.NewController(kubeClient, cloudProvider),
 	}
 
-	if !options.FromContext(ctx).IgnoreDRARequests {
-		controllers = append(controllers, deviceallocation.NewController(kubeClient))
+	if deviceAllocationCtrl != nil {
+		controllers = append(controllers, deviceAllocationCtrl)
 	}
 
 	if !options.FromContext(ctx).DisableClusterStateObservability {
