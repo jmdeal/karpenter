@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"sigs.k8s.io/karpenter/pkg/apis"
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -72,9 +71,9 @@ var _ = BeforeEach(func() {
 	it = fake.NewInstanceType(test.RandomName(),
 		fake.WithArchitecture("arch"),
 		fake.WithResources(resources),
-		fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
-		fake.WithOfferings([]*cloudprovider.Offering{
-			{
+		fake.WithOperatingSystems(string(corev1.Linux)),
+		fake.WithOfferings(
+			&cloudprovider.Offering{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
@@ -82,7 +81,7 @@ var _ = BeforeEach(func() {
 				}),
 				Price: fake.PriceFromResources(resources),
 			},
-			{
+			&cloudprovider.Offering{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
@@ -90,7 +89,7 @@ var _ = BeforeEach(func() {
 				}),
 				Price: fake.PriceFromResources(resources),
 			},
-		}),
+		),
 	)
 	cp.InstanceTypes = append(cp.InstanceTypes, it)
 	ctx = options.ToContext(ctx, test.Options())

@@ -967,23 +967,19 @@ var _ = Describe("Drift", func() {
 		})
 		It("can replace drifted nodes with multiple nodes", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
-						Available:    false,
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
-						Price:        0.5,
-					},
+				fake.WithOfferings(&cloudprovider.Offering{
+					Available:    false,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+					Price:        0.5,
 				}),
 			)
 			replacementInstance := fake.NewInstanceType("replacement-on-demand",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
-						Available:    true,
-						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
-						Price:        0.3,
-					},
+				fake.WithOfferings(&cloudprovider.Offering{
+					Available:    true,
+					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
+					Price:        0.3,
 				}),
-				fake.WithResources(map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse("3")}),
+				fake.WithResources(corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3")}),
 			)
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				currentInstance,

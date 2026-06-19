@@ -81,15 +81,13 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("no overlays - everything shared",
 			"no overlays - everything shared",
 			fake.NewInstanceType("m5.large",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
-						Requirements: scheduling.NewRequirements(
-							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
-							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
-						),
-						Price:     0.096,
-						Available: true,
-					},
+				fake.WithOfferings(&cloudprovider.Offering{
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+					),
+					Price:     0.096,
+					Available: true,
 				}),
 			),
 			nil,
@@ -120,15 +118,13 @@ var _ = Describe("Store Apply Selective Copy", func() {
 		Entry("capacity overlay only - capacity copied, others shared",
 			"capacity overlay only - capacity copied, others shared",
 			fake.NewInstanceType("m5.large",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
-						Requirements: scheduling.NewRequirements(
-							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
-							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
-						),
-						Price:     0.096,
-						Available: true,
-					},
+				fake.WithOfferings(&cloudprovider.Offering{
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+					),
+					Price:     0.096,
+					Available: true,
 				}),
 			),
 			nil,
@@ -171,8 +167,8 @@ var _ = Describe("Store Apply Correctness", func() {
 		It("should correctly apply price overlay to specific offerings", func() {
 			originalPrice := 0.096
 			instanceType := fake.NewInstanceType("m5.large",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
+				fake.WithOfferings(
+					&cloudprovider.Offering{
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
@@ -180,7 +176,7 @@ var _ = Describe("Store Apply Correctness", func() {
 						Price:     originalPrice,
 						Available: true,
 					},
-					{
+					&cloudprovider.Offering{
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2b"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
@@ -188,7 +184,7 @@ var _ = Describe("Store Apply Correctness", func() {
 						Price:     originalPrice,
 						Available: true,
 					},
-				}),
+				),
 			)
 
 			store := newInternalInstanceTypeStore()
@@ -265,15 +261,13 @@ var _ = Describe("Store Apply Correctness", func() {
 var _ = Describe("Store Apply Isolation Between NodePools", func() {
 	It("should apply different overlays to different node pools", func() {
 		instanceType := fake.NewInstanceType("m5.large",
-			fake.WithOfferings([]*cloudprovider.Offering{
-				{
-					Requirements: scheduling.NewRequirements(
-						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
-						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
-					),
-					Price:     0.096,
-					Available: true,
-				},
+			fake.WithOfferings(&cloudprovider.Offering{
+				Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+					scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+				),
+				Price:     0.096,
+				Available: true,
 			}),
 		)
 
@@ -345,8 +339,8 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 		// Create a realistic scenario with multiple instance types and overlays
 		instanceTypes := []*cloudprovider.InstanceType{
 			fake.NewInstanceType("m5.large",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
+				fake.WithOfferings(
+					&cloudprovider.Offering{
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
@@ -354,7 +348,7 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 						Price:     0.096,
 						Available: true,
 					},
-					{
+					&cloudprovider.Offering{
 						Requirements: scheduling.NewRequirements(
 							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
 							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "spot"),
@@ -362,22 +356,20 @@ var _ = Describe("NodeOverlay Store Integration", func() {
 						Price:     0.0288,
 						Available: true,
 					},
-				}),
+				),
 				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceMemory: resource.MustParse("8Gi"),
 					corev1.ResourceCPU:    resource.MustParse("2"),
 				}),
 			),
 			fake.NewInstanceType("m5.xlarge",
-				fake.WithOfferings([]*cloudprovider.Offering{
-					{
-						Requirements: scheduling.NewRequirements(
-							scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
-							scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
-						),
-						Price:     0.192,
-						Available: true,
-					},
+				fake.WithOfferings(&cloudprovider.Offering{
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-west-2a"),
+						scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+					),
+					Price:     0.192,
+					Available: true,
 				}),
 				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceMemory: resource.MustParse("16Gi"),

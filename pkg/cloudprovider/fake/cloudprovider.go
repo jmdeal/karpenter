@@ -31,7 +31,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	v1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -251,7 +250,7 @@ func (c *CloudProvider) GetInstanceTypes(_ context.Context, np *v1.NodePool) ([]
 		),
 		NewInstanceType("arm-instance-type",
 			WithArchitecture("arm64"),
-			WithOperatingSystems(sets.New("ios", string(corev1.Linux), string(corev1.Windows), "darwin")),
+			WithOperatingSystems("ios", string(corev1.Linux), string(corev1.Windows), "darwin"),
 			WithResources(corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("16"),
 				corev1.ResourceMemory: resource.MustParse("128Gi"),

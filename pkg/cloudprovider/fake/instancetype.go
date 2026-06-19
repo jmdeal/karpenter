@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -46,67 +47,69 @@ func init() {
 	)
 }
 
-type InstanceTypeOption func(*instanceTypeConfig)
+type InstanceTypeOptions = option.Function[InstanceTypeConfig]
 
-type instanceTypeConfig struct {
-	resources        corev1.ResourceList
-	offerings        cloudprovider.Offerings
-	architecture     string
-	operatingSystems sets.Set[string]
-	dynamicResources cloudprovider.DynamicResources
-	requirements     []*scheduling.Requirement
+type InstanceTypeConfig struct {
+	Resources              corev1.ResourceList
+	Offerings              cloudprovider.Offerings
+	Architecture           string
+	OperatingSystems       sets.Set[string]
+	ResourceSliceTemplates []*cloudprovider.ResourceSliceTemplate
+	AttributeBindings      []*cloudprovider.AttributeBinding
+	Requirements           []*scheduling.Requirement
 }
 
-func WithResources(resources corev1.ResourceList) InstanceTypeOption {
-	return func(c *instanceTypeConfig) { c.resources = resources }
+func WithResources(resources corev1.ResourceList) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.Resources = resources }
 }
 
-func WithOfferings(offerings cloudprovider.Offerings) InstanceTypeOption {
-	return func(c *instanceTypeConfig) { c.offerings = offerings }
+func WithOfferings(offerings ...*cloudprovider.Offering) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.Offerings = offerings }
 }
 
-func WithArchitecture(arch string) InstanceTypeOption {
-	return func(c *instanceTypeConfig) { c.architecture = arch }
+func WithArchitecture(arch string) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.Architecture = arch }
 }
 
-func WithOperatingSystems(os sets.Set[string]) InstanceTypeOption {
-	return func(c *instanceTypeConfig) { c.operatingSystems = os }
+func WithOperatingSystems(os ...string) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.OperatingSystems = sets.New(os...) }
 }
 
-func WithDynamicResources(dr cloudprovider.DynamicResources) InstanceTypeOption {
-	return func(c *instanceTypeConfig) { c.dynamicResources = dr }
+func WithResourceSliceTemplates(templates ...*cloudprovider.ResourceSliceTemplate) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.ResourceSliceTemplates = templates }
 }
 
-func WithRequirements(reqs ...*scheduling.Requirement) InstanceTypeOption {
-	return func(c *instanceTypeConfig) { c.requirements = reqs }
+func WithAttributeBindings(bindings ...*cloudprovider.AttributeBinding) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.AttributeBindings = bindings }
 }
 
-func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.InstanceType {
-	cfg := &instanceTypeConfig{}
-	for _, opt := range opts {
-		opt(cfg)
+func WithRequirements(reqs ...*scheduling.Requirement) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) { c.Requirements = reqs }
+}
+
+func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.InstanceType {
+	cfg := option.Resolve(opts...)
+	if cfg.Resources == nil {
+		cfg.Resources = corev1.ResourceList{}
 	}
-	if cfg.resources == nil {
-		cfg.resources = corev1.ResourceList{}
+	if r := cfg.Resources[corev1.ResourceCPU]; r.IsZero() {
+		cfg.Resources[corev1.ResourceCPU] = resource.MustParse("4")
 	}
-	if r := cfg.resources[corev1.ResourceCPU]; r.IsZero() {
-		cfg.resources[corev1.ResourceCPU] = resource.MustParse("4")
+	if r := cfg.Resources[corev1.ResourceMemory]; r.IsZero() {
+		cfg.Resources[corev1.ResourceMemory] = resource.MustParse("4Gi")
 	}
-	if r := cfg.resources[corev1.ResourceMemory]; r.IsZero() {
-		cfg.resources[corev1.ResourceMemory] = resource.MustParse("4Gi")
+	if r := cfg.Resources[corev1.ResourcePods]; r.IsZero() {
+		cfg.Resources[corev1.ResourcePods] = resource.MustParse("5")
 	}
-	if r := cfg.resources[corev1.ResourcePods]; r.IsZero() {
-		cfg.resources[corev1.ResourcePods] = resource.MustParse("5")
-	}
-	if len(cfg.offerings) == 0 {
-		cfg.offerings = []*cloudprovider.Offering{
+	if len(cfg.Offerings) == 0 {
+		cfg.Offerings = cloudprovider.Offerings{
 			{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "spot",
 					corev1.LabelTopologyZone: "test-zone-1",
 				}),
-				Price: PriceFromResources(cfg.resources),
+				Price: PriceFromResources(cfg.Resources),
 			},
 			{
 				Available: true,
@@ -114,7 +117,7 @@ func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.Ins
 					v1.CapacityTypeLabelKey:  "spot",
 					corev1.LabelTopologyZone: "test-zone-2",
 				}),
-				Price: PriceFromResources(cfg.resources),
+				Price: PriceFromResources(cfg.Resources),
 			},
 			{
 				Available: true,
@@ -122,7 +125,7 @@ func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.Ins
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-1",
 				}),
-				Price: PriceFromResources(cfg.resources),
+				Price: PriceFromResources(cfg.Resources),
 			},
 			{
 				Available: true,
@@ -130,7 +133,7 @@ func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.Ins
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-2",
 				}),
-				Price: PriceFromResources(cfg.resources),
+				Price: PriceFromResources(cfg.Resources),
 			},
 			{
 				Available: true,
@@ -138,35 +141,35 @@ func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.Ins
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-3",
 				}),
-				Price: PriceFromResources(cfg.resources),
+				Price: PriceFromResources(cfg.Resources),
 			},
 		}
 	}
-	if len(cfg.architecture) == 0 {
-		cfg.architecture = "amd64"
+	if len(cfg.Architecture) == 0 {
+		cfg.Architecture = "amd64"
 	}
-	if cfg.operatingSystems.Len() == 0 {
-		cfg.operatingSystems = sets.New(string(corev1.Linux), string(corev1.Windows), "darwin")
+	if cfg.OperatingSystems.Len() == 0 {
+		cfg.OperatingSystems = sets.New(string(corev1.Linux), string(corev1.Windows), "darwin")
 	}
 	requirements := scheduling.NewRequirements(
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, name),
-		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, cfg.architecture),
-		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(cfg.operatingSystems)...),
-		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(cfg.offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, cfg.Architecture),
+		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(cfg.OperatingSystems)...),
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(cfg.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 		})...),
-		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(cfg.offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(cfg.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 		})...),
 		scheduling.NewRequirement(LabelInstanceSize, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, corev1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(IntegerInstanceLabelKey, corev1.NodeSelectorOpIn, fmt.Sprint(cfg.resources.Cpu().Value())),
+		scheduling.NewRequirement(IntegerInstanceLabelKey, corev1.NodeSelectorOpIn, fmt.Sprint(cfg.Resources.Cpu().Value())),
 	)
-	for _, req := range cfg.requirements {
+	for _, req := range cfg.Requirements {
 		requirements.Add(req)
 	}
-	if cfg.resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
-		cfg.resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
+	if cfg.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
+		cfg.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
 		requirements.Get(LabelInstanceSize).Insert("large")
 		requirements.Get(ExoticInstanceLabelKey).Insert("optional")
 	} else {
@@ -174,11 +177,14 @@ func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.Ins
 	}
 
 	return &cloudprovider.InstanceType{
-		Name:             name,
-		Requirements:     requirements,
-		Offerings:        cfg.offerings,
-		Capacity:         cfg.resources,
-		DynamicResources: cfg.dynamicResources,
+		Name:         name,
+		Requirements: requirements,
+		Offerings:    cfg.Offerings,
+		Capacity:     cfg.Resources,
+		DynamicResources: cloudprovider.DynamicResources{
+			ResourceSliceTemplates: cfg.ResourceSliceTemplates,
+			AttributeBindings:      cfg.AttributeBindings,
+		},
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -205,17 +211,15 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 							instanceTypes = append(instanceTypes, NewInstanceType(
 								fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(sets.List(os), ","), zone, ct),
 								WithArchitecture(arch),
-								WithOperatingSystems(os),
+								WithOperatingSystems(sets.List(os)...),
 								WithResources(resources),
-								WithOfferings(cloudprovider.Offerings{
-									{
-										Available: true,
-										Requirements: scheduling.NewLabelRequirements(map[string]string{
-											v1.CapacityTypeLabelKey:  ct,
-											corev1.LabelTopologyZone: zone,
-										}),
-										Price: price,
-									},
+								WithOfferings(&cloudprovider.Offering{
+									Available: true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{
+										v1.CapacityTypeLabelKey:  ct,
+										corev1.LabelTopologyZone: zone,
+									}),
+									Price: price,
 								}),
 							))
 						}

@@ -1766,15 +1766,13 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceCPU:    resource.MustParse("2"),
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					}),
-					fake.WithOfferings(cloudprovider.Offerings{
-						{
-							Available: true,
-							Requirements: pscheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
-								corev1.LabelTopologyZone: "test-zone-1a",
-							}),
-							Price: 3.00,
-						},
+					fake.WithOfferings(&cloudprovider.Offering{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-1a",
+						}),
+						Price: 3.00,
 					}),
 				),
 				fake.NewInstanceType("small",
@@ -1782,15 +1780,13 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceCPU:    resource.MustParse("1"),
 						corev1.ResourceMemory: resource.MustParse("1Gi"),
 					}),
-					fake.WithOfferings(cloudprovider.Offerings{
-						{
-							Available: true,
-							Requirements: pscheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
-								corev1.LabelTopologyZone: "test-zone-1a",
-							}),
-							Price: 2.00,
-						},
+					fake.WithOfferings(&cloudprovider.Offering{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-1a",
+						}),
+						Price: 2.00,
 					}),
 				),
 				fake.NewInstanceType("large",
@@ -1798,15 +1794,13 @@ var _ = Context("Scheduling", func() {
 						corev1.ResourceCPU:    resource.MustParse("4"),
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
 					}),
-					fake.WithOfferings(cloudprovider.Offerings{
-						{
-							Available: true,
-							Requirements: pscheduling.NewLabelRequirements(map[string]string{
-								v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
-								corev1.LabelTopologyZone: "test-zone-1a",
-							}),
-							Price: 1.00,
-						},
+					fake.WithOfferings(&cloudprovider.Offering{
+						Available: true,
+						Requirements: pscheduling.NewLabelRequirements(map[string]string{
+							v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,
+							corev1.LabelTopologyZone: "test-zone-1a",
+						}),
+						Price: 1.00,
 					}),
 				),
 			}
@@ -2770,7 +2764,7 @@ var _ = Context("Scheduling", func() {
 		BeforeEach(func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType("instance-type",
-					fake.WithResources(corev1.ResourceList{
+					fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 						corev1.ResourceCPU:  resource.MustParse("1024"),
 						corev1.ResourcePods: resource.MustParse("1024"),
 					}),
@@ -4556,19 +4550,19 @@ var _ = Context("Scheduling", func() {
 			cloudProvider.Reset()
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType("large-instance-type",
-					fake.WithResources(corev1.ResourceList{
+					fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 						corev1.ResourceCPU:    resource.MustParse("6"),
 						corev1.ResourceMemory: resource.MustParse("6Gi"),
 					}),
 				),
 				fake.NewInstanceType("medium-instance-type",
-					fake.WithResources(corev1.ResourceList{
+					fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 						corev1.ResourceCPU:    resource.MustParse("3"),
 						corev1.ResourceMemory: resource.MustParse("3Gi"),
 					}),
 				),
 				fake.NewInstanceType("small-instance-type",
-					fake.WithResources(corev1.ResourceList{
+					fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 						corev1.ResourceCPU:    resource.MustParse("2"),
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
 					}),
@@ -4709,7 +4703,7 @@ var _ = Context("Scheduling", func() {
 			// two separate pools.
 			//cloudProvider.InstanceTypesForNodePool[nodePool.Name] = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
 			distinctInstanceType := fake.NewInstanceType("small-instance-type",
-				fake.WithResources(corev1.ResourceList{
+				fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				}),
@@ -4866,7 +4860,7 @@ var _ = Context("Scheduling", func() {
 			// two separate pools.
 			//cloudProvider.InstanceTypesForNodePool[nodePool.Name] = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
 			targetInstanceType := fake.NewInstanceType("small-instance-type",
-				fake.WithResources(corev1.ResourceList{
+				fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				}),
@@ -4945,7 +4939,7 @@ var _ = Context("Scheduling", func() {
 			// via the first NodePool will result in all capacity for compatible offerings on both NodePools being reserved.
 			// This would produce false negatives.
 			distinctInstanceType := fake.NewInstanceType(targetInstanceTypeName,
-				fake.WithResources(corev1.ResourceList{
+				fake.WithResources(map[corev1.ResourceName]resource.Quantity{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
 				}),
