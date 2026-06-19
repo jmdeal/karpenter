@@ -75,7 +75,7 @@ var _ = Describe("ReservationManager", func() {
 					corev1.ResourceMemory: resource.MustParse("4Gi"),
 					corev1.ResourcePods:   resource.MustParse("10"),
 				}),
-				fake.WithOfferings(threeCapacityOffering),
+				fake.WithOfferings(*threeCapacityOffering),
 			),
 			fake.NewInstanceType("medium-reserved",
 				fake.WithResources(corev1.ResourceList{
@@ -83,7 +83,7 @@ var _ = Describe("ReservationManager", func() {
 					corev1.ResourceMemory: resource.MustParse("8Gi"),
 					corev1.ResourcePods:   resource.MustParse("20"),
 				}),
-				fake.WithOfferings(twoCapacityOffering),
+				fake.WithOfferings(*twoCapacityOffering),
 			),
 			fake.NewInstanceType("large-reserved",
 				fake.WithResources(corev1.ResourceList{
@@ -91,7 +91,7 @@ var _ = Describe("ReservationManager", func() {
 					corev1.ResourceMemory: resource.MustParse("16Gi"),
 					corev1.ResourcePods:   resource.MustParse("40"),
 				}),
-				fake.WithOfferings(oneCapacityOffering),
+				fake.WithOfferings(*oneCapacityOffering),
 			),
 		}
 

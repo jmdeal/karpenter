@@ -1464,7 +1464,7 @@ var _ = Describe("Consolidation", func() {
 				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("5"),
 				}),
-				fake.WithOfferings(&cloudprovider.Offering{
+				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
@@ -1474,7 +1474,7 @@ var _ = Describe("Consolidation", func() {
 				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("5"),
 				}),
-				fake.WithOfferings(&cloudprovider.Offering{
+				fake.WithOfferings(cloudprovider.Offering{
 					Available:    true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.4,
@@ -2193,7 +2193,7 @@ var _ = Describe("Consolidation", func() {
 		)
 		It("won't replace node if any spot replacement is more expensive", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
-				fake.WithOfferings(&cloudprovider.Offering{
+				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
@@ -2201,17 +2201,17 @@ var _ = Describe("Consolidation", func() {
 			)
 			replacementInstance := fake.NewInstanceType("potential-spot-replacement",
 				fake.WithOfferings(
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        1.0,
 					},
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 					},
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.4,
@@ -2272,7 +2272,7 @@ var _ = Describe("Consolidation", func() {
 		})
 		It("won't replace on-demand node if on-demand replacement is more expensive", func() {
 			currentInstance := fake.NewInstanceType("current-on-demand",
-				fake.WithOfferings(&cloudprovider.Offering{
+				fake.WithOfferings(cloudprovider.Offering{
 					Available:    false,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        0.5,
@@ -2280,22 +2280,22 @@ var _ = Describe("Consolidation", func() {
 			)
 			replacementInstance := fake.NewInstanceType("on-demand-replacement",
 				fake.WithOfferings(
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.6,
 					},
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.6,
 					},
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1b"}),
 						Price:        0.2,
 					},
-					&cloudprovider.Offering{
+					cloudprovider.Offering{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.3,

@@ -63,8 +63,10 @@ func WithResources(resources corev1.ResourceList) InstanceTypeOptions {
 	return func(c *InstanceTypeConfig) { c.Resources = resources }
 }
 
-func WithOfferings(offerings ...*cloudprovider.Offering) InstanceTypeOptions {
-	return func(c *InstanceTypeConfig) { c.Offerings = offerings }
+func WithOfferings(offerings ...cloudprovider.Offering) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) {
+		c.Offerings = lo.ToSlicePtr(offerings)
+	}
 }
 
 func WithArchitecture(arch string) InstanceTypeOptions {
@@ -75,12 +77,16 @@ func WithOperatingSystems(os ...string) InstanceTypeOptions {
 	return func(c *InstanceTypeConfig) { c.OperatingSystems = sets.New(os...) }
 }
 
-func WithResourceSliceTemplates(templates ...*cloudprovider.ResourceSliceTemplate) InstanceTypeOptions {
-	return func(c *InstanceTypeConfig) { c.ResourceSliceTemplates = templates }
+func WithResourceSliceTemplates(templates ...cloudprovider.ResourceSliceTemplate) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) {
+		c.ResourceSliceTemplates = lo.ToSlicePtr(templates)
+	}
 }
 
-func WithAttributeBindings(bindings ...*cloudprovider.AttributeBinding) InstanceTypeOptions {
-	return func(c *InstanceTypeConfig) { c.AttributeBindings = bindings }
+func WithAttributeBindings(bindings ...cloudprovider.AttributeBinding) InstanceTypeOptions {
+	return func(c *InstanceTypeConfig) {
+		c.AttributeBindings = lo.ToSlicePtr(bindings)
+	}
 }
 
 func WithRequirements(reqs ...*scheduling.Requirement) InstanceTypeOptions {
@@ -213,7 +219,7 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 								WithArchitecture(arch),
 								WithOperatingSystems(sets.List(os)...),
 								WithResources(resources),
-								WithOfferings(&cloudprovider.Offering{
+								WithOfferings(cloudprovider.Offering{
 									Available: true,
 									Requirements: scheduling.NewLabelRequirements(map[string]string{
 										v1.CapacityTypeLabelKey:  ct,

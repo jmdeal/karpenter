@@ -73,7 +73,7 @@ var _ = BeforeEach(func() {
 		fake.WithResources(resources),
 		fake.WithOperatingSystems(string(corev1.Linux)),
 		fake.WithOfferings(
-			&cloudprovider.Offering{
+			cloudprovider.Offering{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
@@ -81,7 +81,7 @@ var _ = BeforeEach(func() {
 				}),
 				Price: fake.PriceFromResources(resources),
 			},
-			&cloudprovider.Offering{
+			cloudprovider.Offering{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  v1.CapacityTypeOnDemand,

@@ -80,7 +80,7 @@ var _ = BeforeEach(func() {
 
 	cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 		fake.NewInstanceType("default-instance-type",
-			fake.WithOfferings(&cloudprovider.Offering{
+			fake.WithOfferings(cloudprovider.Offering{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "spot",
@@ -292,7 +292,7 @@ var _ = Describe("Validation", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 					fake.NewInstanceType("default-instance-type",
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -300,7 +300,7 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 1.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -308,7 +308,7 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 2.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -316,7 +316,7 @@ var _ = Describe("Validation", func() {
 								}),
 								Price: 3.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "reserved",
@@ -1286,7 +1286,7 @@ var _ = Describe("Instance Type Controller", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 					fake.NewInstanceType("default-instance-type",
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1294,7 +1294,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -1351,7 +1351,7 @@ var _ = Describe("Instance Type Controller", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 					fake.NewInstanceType("default-instance-type",
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1359,7 +1359,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1416,7 +1416,7 @@ var _ = Describe("Instance Type Controller", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 					fake.NewInstanceType("default-instance-type",
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1424,7 +1424,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -1432,7 +1432,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 2.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "reserved",
@@ -1522,7 +1522,7 @@ var _ = Describe("Instance Type Controller", func() {
 				cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 					fake.NewInstanceType("default-instance-type",
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "spot",
@@ -1530,7 +1530,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 1.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "on-demand",
@@ -1538,7 +1538,7 @@ var _ = Describe("Instance Type Controller", func() {
 								}),
 								Price: 2.020,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available: true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{
 									v1.CapacityTypeLabelKey:  "reserved",
@@ -2029,7 +2029,7 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should update capacity for instance types from multiple overlays", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType("default-instance-type-zone-one",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "spot",
@@ -2039,7 +2039,7 @@ var _ = Describe("Instance Type Controller", func() {
 					}),
 				),
 				fake.NewInstanceType("default-instance-type-zone-two",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "on-demand",
@@ -2049,7 +2049,7 @@ var _ = Describe("Instance Type Controller", func() {
 					}),
 				),
 				fake.NewInstanceType("default-instance-type-zone-four",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "reserved",
@@ -2124,7 +2124,7 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should update capacity for one instance types from multiple overlays", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType("default-instance-type-zone-one",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "spot",
@@ -2188,7 +2188,7 @@ var _ = Describe("Instance Type Controller", func() {
 		It("should update price offerings instance types from multiple overlays with different weights", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				fake.NewInstanceType("default-instance-type-zone-one",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "spot",
@@ -2198,7 +2198,7 @@ var _ = Describe("Instance Type Controller", func() {
 					}),
 				),
 				fake.NewInstanceType("default-instance-type-zone-two",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "on-demand",
@@ -2208,7 +2208,7 @@ var _ = Describe("Instance Type Controller", func() {
 					}),
 				),
 				fake.NewInstanceType("default-instance-type-zone-four",
-					fake.WithOfferings(&cloudprovider.Offering{
+					fake.WithOfferings(cloudprovider.Offering{
 						Available: true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{
 							v1.CapacityTypeLabelKey:  "reserved",

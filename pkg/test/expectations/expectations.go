@@ -76,15 +76,18 @@ const (
 	RequestInterval           = 1 * time.Second
 )
 
-type Bindings map[*corev1.Pod]*Binding
+type ProvisioningResult struct {
+	Bindings                        map[*corev1.Pod]*Binding
+	ResourceClaimAllocationMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata
+}
 
 type Binding struct {
 	NodeClaim *v1.NodeClaim
 	Node      *corev1.Node
 }
 
-func (b Bindings) Get(p *corev1.Pod) *Binding {
-	for k, v := range b {
+func (r ProvisioningResult) Get(p *corev1.Pod) *Binding {
+	for k, v := range r.Bindings {
 		if client.ObjectKeyFromObject(k) == client.ObjectKeyFromObject(p) {
 			return v
 		}
@@ -305,11 +308,11 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 	}
 }
 
-func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
+func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
-	bindings, draMetadata := expectProvisionedInternal(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	result := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
 	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
-	for pod, binding := range bindings {
+	for pod, binding := range result.Bindings {
 		// Only bind the pods that are passed through
 		if podKeys.Has(client.ObjectKeyFromObject(pod).String()) {
 			// We have to manually bind the pod to the node when using a fakeClient by setting the value for pod.Spec.NodeName
@@ -323,23 +326,16 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 			}
 			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
 
-			if draMetadata != nil {
-				ExpectDRAClaimsAllocated(ctx, c, pod, binding, draMetadata)
+			if result.ResourceClaimAllocationMetadata != nil {
+				expectDRAClaimsAllocated(ctx, c, pod, binding, result.ResourceClaimAllocationMetadata)
 			}
 		}
 	}
-	return bindings
+	return result
 }
 
 //nolint:gocyclo
-func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
-	GinkgoHelper()
-	bindings, _ := expectProvisionedInternal(ctx, c, cluster, cloudProvider, provisioner, pods...)
-	return bindings
-}
-
-//nolint:gocyclo
-func expectProvisionedInternal(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) (Bindings, map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
+func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) ProvisioningResult {
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
@@ -347,23 +343,23 @@ func expectProvisionedInternal(ctx context.Context, c client.Client, cluster *st
 	}
 	// TODO: Check the error on the provisioner scheduling round
 	results, err := provisioner.Schedule(ctx)
-	bindings := Bindings{}
+	result := ProvisioningResult{Bindings: map[*corev1.Pod]*Binding{}}
 	if err != nil {
 		log.Printf("error provisioning in test, %s", err)
-		return bindings, nil
+		return result
 	}
 	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
 		if err != nil {
-			return bindings, nil
+			return result
 		}
 		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
 		nodeClaim, node := ExpectNodeClaimDeployedAndStateUpdated(ctx, c, cluster, cloudProvider, nodeClaim)
 		if nodeClaim != nil && node != nil {
 			for _, pod := range m.Pods {
-				bindings[pod] = &Binding{
+				result.Bindings[pod] = &Binding{
 					NodeClaim: nodeClaim,
 					Node:      node,
 				}
@@ -372,15 +368,16 @@ func expectProvisionedInternal(ctx context.Context, c client.Client, cluster *st
 	}
 	for _, node := range results.ExistingNodes {
 		for _, pod := range node.Pods {
-			bindings[pod] = &Binding{
+			result.Bindings[pod] = &Binding{
 				Node: node.Node,
 			}
 			if node.NodeClaim != nil {
-				bindings[pod].NodeClaim = node.NodeClaim
+				result.Bindings[pod].NodeClaim = node.NodeClaim
 			}
 		}
 	}
-	return bindings, results.DRAClaimAllocationMetadata
+	result.ResourceClaimAllocationMetadata = results.DRAClaimAllocationMetadata
+	return result
 }
 
 func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
@@ -425,11 +422,11 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
 	nc.Status.NodeName = node.Name
 	ExpectApplied(ctx, c, nc, node)
-	ExpectResourceSlicesCreated(ctx, c, cloudProvider, nc, node)
+	expectResourceSlicesCreated(ctx, c, cloudProvider, nc, node)
 	return nc, node, nil
 }
 
-func ExpectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudprovider.CloudProvider, nc *v1.NodeClaim, node *corev1.Node) {
+func expectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudprovider.CloudProvider, nc *v1.NodeClaim, node *corev1.Node) {
 	GinkgoHelper()
 
 	instanceTypeName := nc.Labels[corev1.LabelInstanceTypeStable]
@@ -438,15 +435,15 @@ func ExpectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudp
 	}
 	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nc.Labels[v1.NodePoolLabelKey]}}
 	instanceTypes, err := cp.GetInstanceTypes(ctx, np)
-	if err != nil {
-		return
-	}
+	Expect(err).ToNot(HaveOccurred())
 	it, found := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
 		return it.Name == instanceTypeName
 	})
-	if !found || len(it.DynamicResources.ResourceSliceTemplates) == 0 {
+	Expect(found).To(BeTrue(), "instance type %q not found in cloud provider", instanceTypeName)
+	if len(it.DynamicResources.ResourceSliceTemplates) == 0 {
 		return
 	}
+	Expect(node.UID).ToNot(BeEmpty(), "node %q has no UID, cannot create owner reference", node.Name)
 
 	// Group templates by driver to set ResourceSliceCount correctly
 	templatesByDriver := map[string][]*cloudprovider.ResourceSliceTemplate{}
@@ -502,7 +499,7 @@ func NodeLocalPoolName(driverName, nodeName string) string {
 	return fmt.Sprintf("%s/%s", driverName, nodeName)
 }
 
-func ExpectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
+func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
 	GinkgoHelper()
 
 	instanceTypeName := binding.Node.Labels[corev1.LabelInstanceTypeStable]
@@ -514,14 +511,17 @@ func ExpectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 			claimName = *podClaim.ResourceClaimName
 		}
 		key := types.NamespacedName{Namespace: pod.Namespace, Name: claimName}
+
+		claim := &resourcev1.ResourceClaim{}
+		Expect(c.Get(ctx, key, claim)).To(Succeed())
+		if claim.Status.Allocation != nil {
+			continue
+		}
+
 		meta, ok := claimMetadata[key]
-		if !ok {
-			continue
-		}
+		Expect(ok).To(BeTrue(), "missing DRA allocation metadata for claim %s", key)
 		devices, ok := meta.Devices[itID]
-		if !ok {
-			continue
-		}
+		Expect(ok).To(BeTrue(), "no device allocation for instance type %q in claim %s", instanceTypeName, key)
 
 		results := make([]resourcev1.DeviceRequestAllocationResult, len(devices))
 		for i, device := range devices {
@@ -536,8 +536,6 @@ func ExpectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 			}
 		}
 
-		claim := &resourcev1.ResourceClaim{}
-		Expect(c.Get(ctx, key, claim)).To(Succeed())
 		claim.Status.Allocation = &resourcev1.AllocationResult{
 			Devices: resourcev1.DeviceAllocationResult{
 				Results: results,

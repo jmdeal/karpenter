@@ -523,7 +523,7 @@ var _ = Describe("Provisioning", func() {
 		Expect(len(nodes.Items)).To(Equal(2))
 
 		// Scheduler should attempt to schedule all the pods to the new node
-		for _, n := range bindings {
+		for _, n := range bindings.Bindings {
 			Expect(n.Node.Name).ToNot(Equal(node.Name))
 		}
 	})
@@ -2781,7 +2781,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
@@ -2794,7 +2794,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
@@ -2832,7 +2832,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
@@ -2845,7 +2845,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
@@ -2893,7 +2893,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
@@ -2906,7 +2906,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
@@ -2969,7 +2969,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
 								Price:        0.52,
@@ -2982,7 +2982,7 @@ var _ = Describe("Provisioning", func() {
 								corev1.ResourceCPU:    resource.MustParse("4"),
 								corev1.ResourceMemory: resource.MustParse("4Gi"),
 							}),
-							fake.WithOfferings(&cloudprovider.Offering{
+							fake.WithOfferings(cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
 								Price:        0.52,
@@ -3086,12 +3086,12 @@ var _ = Describe("Provisioning", func() {
 							corev1.ResourceMemory: resource.MustParse("4Gi"),
 						}),
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 								Price:        0.52,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
 								Price:        0.54,
@@ -3129,12 +3129,12 @@ var _ = Describe("Provisioning", func() {
 							corev1.ResourceMemory: resource.MustParse("4Gi"),
 						}),
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 								Price:        0.52,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
 								Price:        0.54,
@@ -3222,12 +3222,12 @@ var _ = Describe("Provisioning", func() {
 							corev1.ResourceMemory: resource.MustParse("4Gi"),
 						}),
 						fake.WithOfferings(
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
 								Price:        0.52,
 							},
-							&cloudprovider.Offering{
+							cloudprovider.Offering{
 								Available:    true,
 								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
 								Price:        0.54,
@@ -3307,7 +3307,7 @@ func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources
 		fake.WithArchitecture("arch"),
 		fake.WithResources(resources),
 		fake.WithOperatingSystems(string(corev1.Linux)),
-		fake.WithOfferings(&cloudprovider.Offering{
+		fake.WithOfferings(cloudprovider.Offering{
 			Available: true,
 			Requirements: scheduling.NewLabelRequirements(map[string]string{
 				v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
