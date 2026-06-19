@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
 	karpopts "sigs.k8s.io/karpenter/pkg/operator/options"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/utils/pod"
 	"sigs.k8s.io/karpenter/pkg/utils/resources"
 )
@@ -237,9 +238,10 @@ func (e DRAError) Unwrap() error {
 
 // Results contains the results of the scheduling operation
 type Results struct {
-	NewNodeClaims []*NodeClaim
-	ExistingNodes []*ExistingNode
-	PodErrors     map[*corev1.Pod]error
+	NewNodeClaims              []*NodeClaim
+	ExistingNodes              []*ExistingNode
+	PodErrors                  map[*corev1.Pod]error
+	DRAClaimAllocationMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata
 }
 
 // Record sends eventing and log messages back for the results that were produced from a scheduling run

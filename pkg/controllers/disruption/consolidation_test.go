@@ -1460,32 +1460,30 @@ var _ = Describe("Consolidation", func() {
 					Values:   []string{v1.CapacityTypeOnDemand},
 				},
 			}
-			currentInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "current-on-demand",
-				Resources: corev1.ResourceList{
+			currentInstanceType := fake.NewInstanceType("current-on-demand",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("5"),
-				},
-				Offerings: []*cloudprovider.Offering{
+				}),
+				fake.WithOfferings([]*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 					},
-				},
-			})
-			otherInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "other-on-demand",
-				Resources: corev1.ResourceList{
+				}),
+			)
+			otherInstanceType := fake.NewInstanceType("other-on-demand",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU: resource.MustParse("5"),
-				},
-				Offerings: []*cloudprovider.Offering{
+				}),
+				fake.WithOfferings([]*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.4,
 					},
-				},
-			})
+				}),
+			)
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				currentInstanceType,
 				otherInstanceType,
@@ -2198,19 +2196,17 @@ var _ = Describe("Consolidation", func() {
 			Entry("if the candidate is spot node", true),
 		)
 		It("won't replace node if any spot replacement is more expensive", func() {
-			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "current-on-demand",
-				Offerings: []*cloudprovider.Offering{
+			currentInstance := fake.NewInstanceType("current-on-demand",
+				fake.WithOfferings([]*cloudprovider.Offering{
 					{
 						Available:    false,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 					},
-				},
-			})
-			replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "potential-spot-replacement",
-				Offerings: []*cloudprovider.Offering{
+				}),
+			)
+			replacementInstance := fake.NewInstanceType("potential-spot-replacement",
+				fake.WithOfferings([]*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -2226,8 +2222,8 @@ var _ = Describe("Consolidation", func() {
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.4,
 					},
-				},
-			})
+				}),
+			)
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				currentInstance,
 				replacementInstance,
@@ -2281,19 +2277,17 @@ var _ = Describe("Consolidation", func() {
 			ExpectExists(ctx, env.Client, node)
 		})
 		It("won't replace on-demand node if on-demand replacement is more expensive", func() {
-			currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "current-on-demand",
-				Offerings: []*cloudprovider.Offering{
+			currentInstance := fake.NewInstanceType("current-on-demand",
+				fake.WithOfferings([]*cloudprovider.Offering{
 					{
 						Available:    false,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 						Price:        0.5,
 					},
-				},
-			})
-			replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "on-demand-replacement",
-				Offerings: []*cloudprovider.Offering{
+				}),
+			)
+			replacementInstance := fake.NewInstanceType("on-demand-replacement",
+				fake.WithOfferings([]*cloudprovider.Offering{
 					{
 						Available:    true,
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -2314,8 +2308,8 @@ var _ = Describe("Consolidation", func() {
 						Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 						Price:        0.3,
 					},
-				},
-			})
+				}),
+			)
 
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				currentInstance,
@@ -3034,22 +3028,20 @@ var _ = Describe("Consolidation", func() {
 			Expect(ok).To(BeTrue())
 		})
 		It("should consider initialized nodes before uninitialized nodes", func() {
-			defaultInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "default-instance-type",
-				Resources: corev1.ResourceList{
+			defaultInstanceType := fake.NewInstanceType("default-instance-type",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("3"),
 					corev1.ResourceMemory: resource.MustParse("3Gi"),
 					corev1.ResourcePods:   resource.MustParse("110"),
-				},
-			})
-			smallInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "small-instance-type",
-				Resources: corev1.ResourceList{
+				}),
+			)
+			smallInstanceType := fake.NewInstanceType("small-instance-type",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("1"),
 					corev1.ResourceMemory: resource.MustParse("1Gi"),
 					corev1.ResourcePods:   resource.MustParse("10"),
-				},
-			})
+				}),
+			)
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
 				defaultInstanceType,
 				smallInstanceType,

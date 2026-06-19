@@ -69,12 +69,11 @@ var _ = BeforeEach(func() {
 		corev1.ResourceCPU:    resource.MustParse("100"),
 		corev1.ResourceMemory: resource.MustParse("100Gi"),
 	}
-	it = fake.NewInstanceType(fake.InstanceTypeOptions{
-		Name:             test.RandomName(),
-		Architecture:     "arch",
-		Resources:        resources,
-		OperatingSystems: sets.New(string(corev1.Linux)),
-		Offerings: []*cloudprovider.Offering{
+	it = fake.NewInstanceType(test.RandomName(),
+		fake.WithArchitecture("arch"),
+		fake.WithResources(resources),
+		fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+		fake.WithOfferings([]*cloudprovider.Offering{
 			{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
@@ -91,8 +90,8 @@ var _ = BeforeEach(func() {
 				}),
 				Price: fake.PriceFromResources(resources),
 			},
-		},
-	})
+		}),
+	)
 	cp.InstanceTypes = append(cp.InstanceTypes, it)
 	ctx = options.ToContext(ctx, test.Options())
 	env.Clock.SetTime(time.Now())

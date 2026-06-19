@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	opmetrics "github.com/awslabs/operatorpkg/metrics"
 	"github.com/awslabs/operatorpkg/singleton"
@@ -65,6 +66,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/controllers/state/informer"
 	"sigs.k8s.io/karpenter/pkg/metrics"
 	pscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
+	"sigs.k8s.io/karpenter/pkg/scheduling/dynamicresources"
 	"sigs.k8s.io/karpenter/pkg/test"
 	testv1alpha1 "sigs.k8s.io/karpenter/pkg/test/v1alpha1"
 )
@@ -305,7 +307,7 @@ func ExpectFinalizersRemoved(ctx context.Context, c client.Client, objs ...clien
 
 func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
 	GinkgoHelper()
-	bindings := ExpectProvisionedNoBinding(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	bindings, draMetadata := expectProvisionedInternal(ctx, c, cluster, cloudProvider, provisioner, pods...)
 	podKeys := sets.NewString(lo.Map(pods, func(p *corev1.Pod, _ int) string { return client.ObjectKeyFromObject(p).String() })...)
 	for pod, binding := range bindings {
 		// Only bind the pods that are passed through
@@ -320,6 +322,10 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 				ExpectManualBinding(ctx, c, pod, binding.Node)
 			}
 			Expect(cluster.UpdatePod(ctx, pod)).To(Succeed()) // track pod bindings
+
+			if draMetadata != nil {
+				ExpectDRAClaimsAllocated(ctx, c, pod, binding, draMetadata)
+			}
 		}
 	}
 	return bindings
@@ -327,6 +333,13 @@ func ExpectProvisioned(ctx context.Context, c client.Client, cluster *state.Clus
 
 //nolint:gocyclo
 func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) Bindings {
+	GinkgoHelper()
+	bindings, _ := expectProvisionedInternal(ctx, c, cluster, cloudProvider, provisioner, pods...)
+	return bindings
+}
+
+//nolint:gocyclo
+func expectProvisionedInternal(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) (Bindings, map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
 	GinkgoHelper()
 	// Persist objects
 	for _, pod := range pods {
@@ -337,13 +350,13 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 	bindings := Bindings{}
 	if err != nil {
 		log.Printf("error provisioning in test, %s", err)
-		return bindings
+		return bindings, nil
 	}
 	for _, m := range results.NewNodeClaims {
 		// TODO: Check the error on the provisioner launch
 		nodeClaimName, err := provisioner.Create(ctx, m, provisioning.WithReason(metrics.ProvisionedReason))
 		if err != nil {
-			return bindings
+			return bindings, nil
 		}
 		nodeClaim := &v1.NodeClaim{}
 		Expect(c.Get(ctx, types.NamespacedName{Name: nodeClaimName}, nodeClaim)).To(Succeed())
@@ -367,7 +380,7 @@ func ExpectProvisionedNoBinding(ctx context.Context, c client.Client, cluster *s
 			}
 		}
 	}
-	return bindings
+	return bindings, results.DRAClaimAllocationMetadata
 }
 
 func ExpectProvisionedResults(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, provisioner *provisioning.Provisioner, pods ...*corev1.Pod) scheduling.Results {
@@ -412,7 +425,126 @@ func ExpectNodeClaimDeployed(ctx context.Context, c client.Client, cloudProvider
 	node.Labels = lo.Assign(node.Labels, map[string]string{v1.NodeRegisteredLabelKey: "true"})
 	nc.Status.NodeName = node.Name
 	ExpectApplied(ctx, c, nc, node)
+	ExpectResourceSlicesCreated(ctx, c, cloudProvider, nc, node)
 	return nc, node, nil
+}
+
+func ExpectResourceSlicesCreated(ctx context.Context, c client.Client, cp cloudprovider.CloudProvider, nc *v1.NodeClaim, node *corev1.Node) {
+	GinkgoHelper()
+
+	instanceTypeName := nc.Labels[corev1.LabelInstanceTypeStable]
+	if instanceTypeName == "" {
+		return
+	}
+	np := &v1.NodePool{ObjectMeta: metav1.ObjectMeta{Name: nc.Labels[v1.NodePoolLabelKey]}}
+	instanceTypes, err := cp.GetInstanceTypes(ctx, np)
+	if err != nil {
+		return
+	}
+	it, found := lo.Find(instanceTypes, func(it *cloudprovider.InstanceType) bool {
+		return it.Name == instanceTypeName
+	})
+	if !found || len(it.DynamicResources.ResourceSliceTemplates) == 0 {
+		return
+	}
+
+	// Group templates by driver to set ResourceSliceCount correctly
+	templatesByDriver := map[string][]*cloudprovider.ResourceSliceTemplate{}
+	for _, t := range it.DynamicResources.ResourceSliceTemplates {
+		templatesByDriver[t.Driver.Value()] = append(templatesByDriver[t.Driver.Value()], t)
+	}
+
+	for driver, templates := range templatesByDriver {
+		poolName := NodeLocalPoolName(driver, node.Name)
+		sliceCount := int64(len(templates))
+		for i, t := range templates {
+			devices := make([]resourcev1.Device, len(t.Devices))
+			for j, d := range t.Devices {
+				devices[j] = resourcev1.Device{
+					Name:       d.Name.Value(),
+					Attributes: d.Attributes,
+					Capacity:   d.Capacity,
+				}
+			}
+
+			sliceName := fmt.Sprintf("%s-%s", node.Name, strings.ReplaceAll(strings.ReplaceAll(driver, ".", "-"), "/", "-"))
+			if sliceCount > 1 {
+				sliceName = fmt.Sprintf("%s-%d", sliceName, i)
+			}
+			slice := &resourcev1.ResourceSlice{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: sliceName,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "v1",
+						Kind:       "Node",
+						Name:       node.Name,
+						UID:        node.UID,
+					}},
+				},
+				Spec: resourcev1.ResourceSliceSpec{
+					Driver:   driver,
+					NodeName: &node.Name,
+					Pool: resourcev1.ResourcePool{
+						Name:               poolName,
+						Generation:         1,
+						ResourceSliceCount: sliceCount,
+					},
+					Devices:        devices,
+					SharedCounters: t.SharedCounters,
+				},
+			}
+			ExpectApplied(ctx, c, slice)
+		}
+	}
+}
+
+func NodeLocalPoolName(driverName, nodeName string) string {
+	return fmt.Sprintf("%s/%s", driverName, nodeName)
+}
+
+func ExpectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.Pod, binding *Binding, claimMetadata map[types.NamespacedName]*dynamicresources.ResourceClaimAllocationMetadata) {
+	GinkgoHelper()
+
+	instanceTypeName := binding.Node.Labels[corev1.LabelInstanceTypeStable]
+	itID := unique.Make(instanceTypeName)
+
+	for _, podClaim := range pod.Spec.ResourceClaims {
+		claimName := podClaim.Name
+		if podClaim.ResourceClaimName != nil {
+			claimName = *podClaim.ResourceClaimName
+		}
+		key := types.NamespacedName{Namespace: pod.Namespace, Name: claimName}
+		meta, ok := claimMetadata[key]
+		if !ok {
+			continue
+		}
+		devices, ok := meta.Devices[itID]
+		if !ok {
+			continue
+		}
+
+		results := make([]resourcev1.DeviceRequestAllocationResult, len(devices))
+		for i, device := range devices {
+			poolName := device.Pool.Value()
+			if device.Template {
+				poolName = NodeLocalPoolName(device.Driver.Value(), binding.Node.Name)
+			}
+			results[i] = resourcev1.DeviceRequestAllocationResult{
+				Driver: device.Driver.Value(),
+				Pool:   poolName,
+				Device: device.Device.Value(),
+			}
+		}
+
+		claim := &resourcev1.ResourceClaim{}
+		Expect(c.Get(ctx, key, claim)).To(Succeed())
+		claim.Status.Allocation = &resourcev1.AllocationResult{
+			Devices: resourcev1.DeviceAllocationResult{
+				Results: results,
+			},
+		}
+		ExpectApplied(ctx, c, claim)
+	}
 }
 
 func ExpectNodeClaimDeployedAndStateUpdated(ctx context.Context, c client.Client, cluster *state.Cluster, cloudProvider cloudprovider.CloudProvider, nc *v1.NodeClaim) (*v1.NodeClaim, *corev1.Node) {

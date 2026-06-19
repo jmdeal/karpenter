@@ -1761,13 +1761,12 @@ var _ = Context("Scheduling", func() {
 			// capacity sizes and prices don't correlate here, regardless we should filter and see that all three instance types
 			// are valid before preferring the cheapest one 'large'
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "medium",
-					Resources: corev1.ResourceList{
+				fake.NewInstanceType("medium",
+					fake.WithResources(corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("2"),
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
-					},
-					Offerings: []*cloudprovider.Offering{
+					}),
+					fake.WithOfferings(cloudprovider.Offerings{
 						{
 							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
@@ -1776,15 +1775,14 @@ var _ = Context("Scheduling", func() {
 							}),
 							Price: 3.00,
 						},
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "small",
-					Resources: corev1.ResourceList{
+					}),
+				),
+				fake.NewInstanceType("small",
+					fake.WithResources(corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("1"),
 						corev1.ResourceMemory: resource.MustParse("1Gi"),
-					},
-					Offerings: []*cloudprovider.Offering{
+					}),
+					fake.WithOfferings(cloudprovider.Offerings{
 						{
 							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
@@ -1793,15 +1791,14 @@ var _ = Context("Scheduling", func() {
 							}),
 							Price: 2.00,
 						},
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "large",
-					Resources: corev1.ResourceList{
+					}),
+				),
+				fake.NewInstanceType("large",
+					fake.WithResources(corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("4"),
 						corev1.ResourceMemory: resource.MustParse("4Gi"),
-					},
-					Offerings: []*cloudprovider.Offering{
+					}),
+					fake.WithOfferings(cloudprovider.Offerings{
 						{
 							Available: true,
 							Requirements: pscheduling.NewLabelRequirements(map[string]string{
@@ -1810,8 +1807,8 @@ var _ = Context("Scheduling", func() {
 							}),
 							Price: 1.00,
 						},
-					},
-				}),
+					}),
+				),
 			}
 			ExpectApplied(ctx, env.Client, nodePool)
 			pod := test.UnschedulablePod(
@@ -2372,14 +2369,13 @@ var _ = Context("Scheduling", func() {
 		// nolint:gosec
 		It("should pack in-flight nodes before launching new nodes", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "medium",
-					Resources: corev1.ResourceList{
+				fake.NewInstanceType("medium",
+					fake.WithResources(corev1.ResourceList{
 						// enough CPU for four pods + a bit of overhead
 						corev1.ResourceCPU:  resource.MustParse("4.25"),
 						corev1.ResourcePods: resource.MustParse("4"),
-					},
-				}),
+					}),
+				),
 			}
 			opts := test.PodOptions{ResourceRequirements: corev1.ResourceRequirements{
 				Limits: map[corev1.ResourceName]resource.Quantity{
@@ -2773,14 +2769,12 @@ var _ = Context("Scheduling", func() {
 	Describe("VolumeUsage", func() {
 		BeforeEach(func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(
-					fake.InstanceTypeOptions{
-						Name: "instance-type",
-						Resources: map[corev1.ResourceName]resource.Quantity{
-							corev1.ResourceCPU:  resource.MustParse("1024"),
-							corev1.ResourcePods: resource.MustParse("1024"),
-						},
+				fake.NewInstanceType("instance-type",
+					fake.WithResources(corev1.ResourceList{
+						corev1.ResourceCPU:  resource.MustParse("1024"),
+						corev1.ResourcePods: resource.MustParse("1024"),
 					}),
+				),
 			}
 			nodePool.Spec.Limits = nil
 		})
@@ -4561,27 +4555,24 @@ var _ = Context("Scheduling", func() {
 		BeforeEach(func() {
 			cloudProvider.Reset()
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "large-instance-type",
-					Resources: map[corev1.ResourceName]resource.Quantity{
+				fake.NewInstanceType("large-instance-type",
+					fake.WithResources(corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("6"),
 						corev1.ResourceMemory: resource.MustParse("6Gi"),
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "medium-instance-type",
-					Resources: map[corev1.ResourceName]resource.Quantity{
+					}),
+				),
+				fake.NewInstanceType("medium-instance-type",
+					fake.WithResources(corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("3"),
 						corev1.ResourceMemory: resource.MustParse("3Gi"),
-					},
-				}),
-				fake.NewInstanceType(fake.InstanceTypeOptions{
-					Name: "small-instance-type",
-					Resources: map[corev1.ResourceName]resource.Quantity{
+					}),
+				),
+				fake.NewInstanceType("small-instance-type",
+					fake.WithResources(corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("2"),
 						corev1.ResourceMemory: resource.MustParse("2Gi"),
-					},
-				}),
+					}),
+				),
 			}
 			reservedInstanceTypes := []*cloudprovider.InstanceType{cloudProvider.InstanceTypes[1], cloudProvider.InstanceTypes[2]}
 			for _, it := range reservedInstanceTypes {
@@ -4717,13 +4708,12 @@ var _ = Context("Scheduling", func() {
 			// instance type. This test should verify that the scheduler treats these offerings as though they are drawing from
 			// two separate pools.
 			//cloudProvider.InstanceTypesForNodePool[nodePool.Name] = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
-			distinctInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "small-instance-type",
-				Resources: map[corev1.ResourceName]resource.Quantity{
+			distinctInstanceType := fake.NewInstanceType("small-instance-type",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
-				},
-			})
+				}),
+			)
 			distinctInstanceType.Offerings = append(distinctInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 1,
 				Available:           true,
@@ -4875,13 +4865,12 @@ var _ = Context("Scheduling", func() {
 			// instance type. This test should verify that the scheduler treats these offerings as though they are drawing from
 			// two separate pools.
 			//cloudProvider.InstanceTypesForNodePool[nodePool.Name] = append([]*cloudprovider.InstanceType{}, cloudProvider.InstanceTypes...)
-			targetInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: "small-instance-type",
-				Resources: map[corev1.ResourceName]resource.Quantity{
+			targetInstanceType := fake.NewInstanceType("small-instance-type",
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
-				},
-			})
+				}),
+			)
 			targetInstanceType.Offerings = append(targetInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 1,
 				Available:           true,
@@ -4955,13 +4944,12 @@ var _ = Context("Scheduling", func() {
 			// Ensure that the offering in the other NodePool uses a different reservation. Otherwise the first pod scheduling
 			// via the first NodePool will result in all capacity for compatible offerings on both NodePools being reserved.
 			// This would produce false negatives.
-			distinctInstanceType := fake.NewInstanceType(fake.InstanceTypeOptions{
-				Name: targetInstanceTypeName,
-				Resources: map[corev1.ResourceName]resource.Quantity{
+			distinctInstanceType := fake.NewInstanceType(targetInstanceTypeName,
+				fake.WithResources(corev1.ResourceList{
 					corev1.ResourceCPU:    resource.MustParse("2"),
 					corev1.ResourceMemory: resource.MustParse("2Gi"),
-				},
-			})
+				}),
+			)
 			distinctInstanceType.Offerings = append(distinctInstanceType.Offerings, &cloudprovider.Offering{
 				ReservationCapacity: 1,
 				Available:           true,

@@ -531,19 +531,17 @@ var _ = Describe("Disruption Taints", func() {
 	var nodeClaim *v1.NodeClaim
 	var node *corev1.Node
 	BeforeEach(func() {
-		currentInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "current-on-demand",
-			Offerings: []*cloudprovider.Offering{
+		currentInstance := fake.NewInstanceType("current-on-demand",
+			fake.WithOfferings([]*cloudprovider.Offering{
 				{
 					Available:    false,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeOnDemand, corev1.LabelTopologyZone: "test-zone-1a"}),
 					Price:        1.5,
 				},
-			},
-		})
-		replacementInstance := fake.NewInstanceType(fake.InstanceTypeOptions{
-			Name: "spot-replacement",
-			Offerings: []*cloudprovider.Offering{
+			}),
+		)
+		replacementInstance := fake.NewInstanceType("spot-replacement",
+			fake.WithOfferings([]*cloudprovider.Offering{
 				{
 					Available:    true,
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1a"}),
@@ -559,8 +557,8 @@ var _ = Describe("Disruption Taints", func() {
 					Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1c"}),
 					Price:        0.4,
 				},
-			},
-		})
+			}),
+		)
 		nodePool = test.NodePool()
 		nodeClaim, node = test.NodeClaimAndNode(v1.NodeClaim{
 			ObjectMeta: metav1.ObjectMeta{

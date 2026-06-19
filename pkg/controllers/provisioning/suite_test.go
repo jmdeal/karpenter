@@ -2773,41 +2773,38 @@ var _ = Describe("Provisioning", func() {
 				It("should not schedule when minValues requirement is not met", func() {
 					// Create only two instance types, which doesn't meet the minValues=3 requirement
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					opts2 := fake.InstanceTypeOptions{
-						Name:             "instance-type-2",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					instanceTypes = append(instanceTypes,
+						fake.NewInstanceType("instance-type-1",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+						fake.NewInstanceType("instance-type-2",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+					)
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, defaultNodePool)
@@ -2831,41 +2828,38 @@ var _ = Describe("Provisioning", func() {
 				It("should schedule even when minValues requirement is not met", func() {
 					// Create only two instance types, which doesn't meet the minValues=3 requirement
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					opts2 := fake.InstanceTypeOptions{
-						Name:             "instance-type-2",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					instanceTypes = append(instanceTypes,
+						fake.NewInstanceType("instance-type-1",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+						fake.NewInstanceType("instance-type-2",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+					)
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, defaultNodePool)
@@ -2899,41 +2893,38 @@ var _ = Describe("Provisioning", func() {
 
 				It("should relax minValues before falling back to other nodepools", func() {
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					opts2 := fake.InstanceTypeOptions{
-						Name:             "instance-type-2",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					instanceTypes = append(instanceTypes,
+						fake.NewInstanceType("instance-type-1",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+						fake.NewInstanceType("instance-type-2",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+					)
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, defaultNodePool)
@@ -2982,41 +2973,38 @@ var _ = Describe("Provisioning", func() {
 
 				It("should choose nodepool with higher weight when relaxing minValues", func() {
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					opts2 := fake.InstanceTypeOptions{
-						Name:             "instance-type-2",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("4"),
-							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-						Offerings: []*cloudprovider.Offering{
-							{
-								Available:    true,
-								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
-								Price:        0.52,
-							},
-						},
-					}
-
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1), fake.NewInstanceType(opts2))
+					instanceTypes = append(instanceTypes,
+						fake.NewInstanceType("instance-type-1",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+						fake.NewInstanceType("instance-type-2",
+							fake.WithArchitecture(v1.ArchitectureArm64),
+							fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+							fake.WithResources(corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("4"),
+								corev1.ResourceMemory: resource.MustParse("4Gi"),
+							}),
+							fake.WithOfferings([]*cloudprovider.Offering{
+								{
+									Available:    true,
+									Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2-spot"}),
+									Price:        0.52,
+								},
+							}),
+						),
+					)
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, defaultNodePool)
@@ -3106,28 +3094,26 @@ var _ = Describe("Provisioning", func() {
 				It("should not schedule when zone minValues requirement is not met", func() {
 					// Create instance types with only two zones, which doesn't meet the minValues=3 requirement
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
+					instanceTypes = append(instanceTypes, fake.NewInstanceType("instance-type-1",
+						fake.WithArchitecture(v1.ArchitectureArm64),
+						fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+						fake.WithResources(corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("4"),
 							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-					}
-					opts1.Offerings = []*cloudprovider.Offering{
-						{
-							Available:    true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
-							Price:        0.52,
-						},
-						{
-							Available:    true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
-							Price:        0.54,
-						},
-					}
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+						}),
+						fake.WithOfferings([]*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+								Price:        0.52,
+							},
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
+								Price:        0.54,
+							},
+						}),
+					))
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, nodePool)
@@ -3151,28 +3137,26 @@ var _ = Describe("Provisioning", func() {
 				It("should schedule even when zone minValues requirement is not met", func() {
 					// Create instance types with only two zones, which doesn't meet the minValues=3 requirement
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
+					instanceTypes = append(instanceTypes, fake.NewInstanceType("instance-type-1",
+						fake.WithArchitecture(v1.ArchitectureArm64),
+						fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+						fake.WithResources(corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("4"),
 							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-					}
-					opts1.Offerings = []*cloudprovider.Offering{
-						{
-							Available:    true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
-							Price:        0.52,
-						},
-						{
-							Available:    true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
-							Price:        0.54,
-						},
-					}
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+						}),
+						fake.WithOfferings([]*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+								Price:        0.52,
+							},
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
+								Price:        0.54,
+							},
+						}),
+					))
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, nodePool)
@@ -3246,28 +3230,26 @@ var _ = Describe("Provisioning", func() {
 
 				It("should schedule when minValues requirement is not met", func() {
 					var instanceTypes []*cloudprovider.InstanceType
-					opts1 := fake.InstanceTypeOptions{
-						Name:             "instance-type-1",
-						Architecture:     v1.ArchitectureArm64,
-						OperatingSystems: sets.New(string(corev1.Linux)),
-						Resources: corev1.ResourceList{
+					instanceTypes = append(instanceTypes, fake.NewInstanceType("instance-type-1",
+						fake.WithArchitecture(v1.ArchitectureArm64),
+						fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+						fake.WithResources(corev1.ResourceList{
 							corev1.ResourceCPU:    resource.MustParse("4"),
 							corev1.ResourceMemory: resource.MustParse("4Gi"),
-						},
-					}
-					opts1.Offerings = []*cloudprovider.Offering{
-						{
-							Available:    true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
-							Price:        0.52,
-						},
-						{
-							Available:    true,
-							Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
-							Price:        0.54,
-						},
-					}
-					instanceTypes = append(instanceTypes, fake.NewInstanceType(opts1))
+						}),
+						fake.WithOfferings([]*cloudprovider.Offering{
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-1"}),
+								Price:        0.52,
+							},
+							{
+								Available:    true,
+								Requirements: scheduling.NewLabelRequirements(map[string]string{v1.CapacityTypeLabelKey: v1.CapacityTypeSpot, corev1.LabelTopologyZone: "test-zone-2"}),
+								Price:        0.54,
+							},
+						}),
+					))
 					cloudProvider.InstanceTypes = instanceTypes
 
 					ExpectApplied(ctx, env.Client, defaultNodePool)
@@ -3336,25 +3318,22 @@ func ExpectNodeClaimRequests(nodeClaim *v1.NodeClaim, resources corev1.ResourceL
 }
 
 func AddInstanceResources(instanceTypes []*cloudprovider.InstanceType, resources corev1.ResourceList) []*cloudprovider.InstanceType {
-	opts := fake.InstanceTypeOptions{
-		Name:             "example",
-		Architecture:     "arch",
-		Resources:        resources,
-		OperatingSystems: sets.New(string(corev1.Linux)),
-	}
-	price := fake.PriceFromResources(opts.Resources)
-	opts.Offerings = []*cloudprovider.Offering{
-		{
-			Available: true,
-			Requirements: scheduling.NewLabelRequirements(map[string]string{
-				v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
-				corev1.LabelTopologyZone: "test-zone-1",
-			}),
-			Price: price,
-		},
-	}
-
-	instanceTypes = append(instanceTypes, fake.NewInstanceType(opts))
+	price := fake.PriceFromResources(resources)
+	instanceTypes = append(instanceTypes, fake.NewInstanceType("example",
+		fake.WithArchitecture("arch"),
+		fake.WithResources(resources),
+		fake.WithOperatingSystems(sets.New(string(corev1.Linux))),
+		fake.WithOfferings([]*cloudprovider.Offering{
+			{
+				Available: true,
+				Requirements: scheduling.NewLabelRequirements(map[string]string{
+					v1.CapacityTypeLabelKey:  v1.CapacityTypeSpot,
+					corev1.LabelTopologyZone: "test-zone-1",
+				}),
+				Price: price,
+			},
+		}),
+	))
 
 	return instanceTypes
 }

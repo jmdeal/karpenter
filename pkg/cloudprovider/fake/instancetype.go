@@ -46,32 +46,67 @@ func init() {
 	)
 }
 
-func NewInstanceType(options InstanceTypeOptions) *cloudprovider.InstanceType {
-	return NewInstanceTypeWithCustomRequirement(options, nil)
+type InstanceTypeOption func(*instanceTypeConfig)
+
+type instanceTypeConfig struct {
+	resources        corev1.ResourceList
+	offerings        cloudprovider.Offerings
+	architecture     string
+	operatingSystems sets.Set[string]
+	dynamicResources cloudprovider.DynamicResources
+	requirements     []*scheduling.Requirement
 }
 
-func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq *scheduling.Requirement) *cloudprovider.InstanceType {
-	if options.Resources == nil {
-		options.Resources = map[corev1.ResourceName]resource.Quantity{}
+func WithResources(resources corev1.ResourceList) InstanceTypeOption {
+	return func(c *instanceTypeConfig) { c.resources = resources }
+}
+
+func WithOfferings(offerings cloudprovider.Offerings) InstanceTypeOption {
+	return func(c *instanceTypeConfig) { c.offerings = offerings }
+}
+
+func WithArchitecture(arch string) InstanceTypeOption {
+	return func(c *instanceTypeConfig) { c.architecture = arch }
+}
+
+func WithOperatingSystems(os sets.Set[string]) InstanceTypeOption {
+	return func(c *instanceTypeConfig) { c.operatingSystems = os }
+}
+
+func WithDynamicResources(dr cloudprovider.DynamicResources) InstanceTypeOption {
+	return func(c *instanceTypeConfig) { c.dynamicResources = dr }
+}
+
+func WithRequirements(reqs ...*scheduling.Requirement) InstanceTypeOption {
+	return func(c *instanceTypeConfig) { c.requirements = reqs }
+}
+
+func NewInstanceType(name string, opts ...InstanceTypeOption) *cloudprovider.InstanceType {
+	cfg := &instanceTypeConfig{}
+	for _, opt := range opts {
+		opt(cfg)
 	}
-	if r := options.Resources[corev1.ResourceCPU]; r.IsZero() {
-		options.Resources[corev1.ResourceCPU] = resource.MustParse("4")
+	if cfg.resources == nil {
+		cfg.resources = corev1.ResourceList{}
 	}
-	if r := options.Resources[corev1.ResourceMemory]; r.IsZero() {
-		options.Resources[corev1.ResourceMemory] = resource.MustParse("4Gi")
+	if r := cfg.resources[corev1.ResourceCPU]; r.IsZero() {
+		cfg.resources[corev1.ResourceCPU] = resource.MustParse("4")
 	}
-	if r := options.Resources[corev1.ResourcePods]; r.IsZero() {
-		options.Resources[corev1.ResourcePods] = resource.MustParse("5")
+	if r := cfg.resources[corev1.ResourceMemory]; r.IsZero() {
+		cfg.resources[corev1.ResourceMemory] = resource.MustParse("4Gi")
 	}
-	if len(options.Offerings) == 0 {
-		options.Offerings = []*cloudprovider.Offering{
+	if r := cfg.resources[corev1.ResourcePods]; r.IsZero() {
+		cfg.resources[corev1.ResourcePods] = resource.MustParse("5")
+	}
+	if len(cfg.offerings) == 0 {
+		cfg.offerings = []*cloudprovider.Offering{
 			{
 				Available: true,
 				Requirements: scheduling.NewLabelRequirements(map[string]string{
 					v1.CapacityTypeLabelKey:  "spot",
 					corev1.LabelTopologyZone: "test-zone-1",
 				}),
-				Price: PriceFromResources(options.Resources),
+				Price: PriceFromResources(cfg.resources),
 			},
 			{
 				Available: true,
@@ -79,7 +114,7 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 					v1.CapacityTypeLabelKey:  "spot",
 					corev1.LabelTopologyZone: "test-zone-2",
 				}),
-				Price: PriceFromResources(options.Resources),
+				Price: PriceFromResources(cfg.resources),
 			},
 			{
 				Available: true,
@@ -87,7 +122,7 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-1",
 				}),
-				Price: PriceFromResources(options.Resources),
+				Price: PriceFromResources(cfg.resources),
 			},
 			{
 				Available: true,
@@ -95,7 +130,7 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-2",
 				}),
-				Price: PriceFromResources(options.Resources),
+				Price: PriceFromResources(cfg.resources),
 			},
 			{
 				Available: true,
@@ -103,35 +138,35 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 					v1.CapacityTypeLabelKey:  "on-demand",
 					corev1.LabelTopologyZone: "test-zone-3",
 				}),
-				Price: PriceFromResources(options.Resources),
+				Price: PriceFromResources(cfg.resources),
 			},
 		}
 	}
-	if len(options.Architecture) == 0 {
-		options.Architecture = "amd64"
+	if len(cfg.architecture) == 0 {
+		cfg.architecture = "amd64"
 	}
-	if options.OperatingSystems.Len() == 0 {
-		options.OperatingSystems = sets.New(string(corev1.Linux), string(corev1.Windows), "darwin")
+	if cfg.operatingSystems.Len() == 0 {
+		cfg.operatingSystems = sets.New(string(corev1.Linux), string(corev1.Windows), "darwin")
 	}
 	requirements := scheduling.NewRequirements(
-		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, options.Name),
-		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, options.Architecture),
-		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(options.OperatingSystems)...),
-		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, name),
+		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, cfg.architecture),
+		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, sets.List(cfg.operatingSystems)...),
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, lo.Map(cfg.offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(corev1.LabelTopologyZone).Any()
 		})...),
-		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(options.Offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
+		scheduling.NewRequirement(v1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, lo.Map(cfg.offerings.Available(), func(o *cloudprovider.Offering, _ int) string {
 			return o.Requirements.Get(v1.CapacityTypeLabelKey).Any()
 		})...),
 		scheduling.NewRequirement(LabelInstanceSize, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(ExoticInstanceLabelKey, corev1.NodeSelectorOpDoesNotExist),
-		scheduling.NewRequirement(IntegerInstanceLabelKey, corev1.NodeSelectorOpIn, fmt.Sprint(options.Resources.Cpu().Value())),
+		scheduling.NewRequirement(IntegerInstanceLabelKey, corev1.NodeSelectorOpIn, fmt.Sprint(cfg.resources.Cpu().Value())),
 	)
-	if customReq != nil {
-		requirements.Add(customReq)
+	for _, req := range cfg.requirements {
+		requirements.Add(req)
 	}
-	if options.Resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
-		options.Resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
+	if cfg.resources.Cpu().Cmp(resource.MustParse("4")) > 0 &&
+		cfg.resources.Memory().Cmp(resource.MustParse("8Gi")) > 0 {
 		requirements.Get(LabelInstanceSize).Insert("large")
 		requirements.Get(ExoticInstanceLabelKey).Insert("optional")
 	} else {
@@ -139,10 +174,11 @@ func NewInstanceTypeWithCustomRequirement(options InstanceTypeOptions, customReq
 	}
 
 	return &cloudprovider.InstanceType{
-		Name:         options.Name,
-		Requirements: requirements,
-		Offerings:    options.Offerings,
-		Capacity:     options.Resources,
+		Name:             name,
+		Requirements:     requirements,
+		Offerings:        cfg.offerings,
+		Capacity:         cfg.resources,
+		DynamicResources: cfg.dynamicResources,
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("100m"),
@@ -161,27 +197,27 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 				for _, ct := range []string{v1.CapacityTypeSpot, v1.CapacityTypeOnDemand} {
 					for _, os := range []sets.Set[string]{sets.New(string(corev1.Linux)), sets.New(string(corev1.Windows))} {
 						for _, arch := range []string{v1.ArchitectureAmd64, v1.ArchitectureArm64} {
-							opts := InstanceTypeOptions{
-								Name:             fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(sets.List(os), ","), zone, ct),
-								Architecture:     arch,
-								OperatingSystems: os,
-								Resources: corev1.ResourceList{
-									corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
-									corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
-								},
+							resources := corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", cpu)),
+								corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", mem)),
 							}
-							price := PriceFromResources(opts.Resources)
-							opts.Offerings = []*cloudprovider.Offering{
-								{
-									Available: true,
-									Requirements: scheduling.NewLabelRequirements(map[string]string{
-										v1.CapacityTypeLabelKey:  ct,
-										corev1.LabelTopologyZone: zone,
-									}),
-									Price: price,
-								},
-							}
-							instanceTypes = append(instanceTypes, NewInstanceType(opts))
+							price := PriceFromResources(resources)
+							instanceTypes = append(instanceTypes, NewInstanceType(
+								fmt.Sprintf("%d-cpu-%d-mem-%s-%s-%s-%s", cpu, mem, arch, strings.Join(sets.List(os), ","), zone, ct),
+								WithArchitecture(arch),
+								WithOperatingSystems(os),
+								WithResources(resources),
+								WithOfferings(cloudprovider.Offerings{
+									{
+										Available: true,
+										Requirements: scheduling.NewLabelRequirements(map[string]string{
+											v1.CapacityTypeLabelKey:  ct,
+											corev1.LabelTopologyZone: zone,
+										}),
+										Price: price,
+									},
+								}),
+							))
 						}
 					}
 				}
@@ -200,24 +236,16 @@ func InstanceTypesAssorted() []*cloudprovider.InstanceType {
 func InstanceTypes(total int) []*cloudprovider.InstanceType {
 	instanceTypes := []*cloudprovider.InstanceType{}
 	for i := range total {
-		instanceTypes = append(instanceTypes, NewInstanceType(InstanceTypeOptions{
-			Name: fmt.Sprintf("fake-it-%d", i),
-			Resources: map[corev1.ResourceName]resource.Quantity{
+		instanceTypes = append(instanceTypes, NewInstanceType(
+			fmt.Sprintf("fake-it-%d", i),
+			WithResources(corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", i+1)),
 				corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dGi", (i+1)*2)),
 				corev1.ResourcePods:   resource.MustParse(fmt.Sprintf("%d", (i+1)*10)),
-			},
-		}))
+			}),
+		))
 	}
 	return instanceTypes
-}
-
-type InstanceTypeOptions struct {
-	Name             string
-	Offerings        cloudprovider.Offerings
-	Architecture     string
-	OperatingSystems sets.Set[string]
-	Resources        corev1.ResourceList
 }
 
 func PriceFromResources(resources corev1.ResourceList) float64 {
