@@ -17,9 +17,10 @@ limitations under the License.
 package scheduling
 
 import (
-	"testing"
 	"unique"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,122 +31,103 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
-func TestResourceClaimName(t *testing.T) {
-	tests := []struct {
-		name     string
-		pod      *corev1.Pod
-		claim    corev1.PodResourceClaim
-		wantName string
-		wantOK   bool
-	}{
-		{
-			name:     "direct claim name",
-			pod:      &corev1.Pod{},
-			claim:    corev1.PodResourceClaim{Name: "ref", ResourceClaimName: lo.ToPtr("claim-a")},
-			wantName: "claim-a",
-			wantOK:   true,
-		},
-		{
-			name: "template generated name from status",
-			pod: &corev1.Pod{Status: corev1.PodStatus{ResourceClaimStatuses: []corev1.PodResourceClaimStatus{
+var _ = Describe("DRA Scheduling Internals", func() {
+	Describe("resourceClaimName", func() {
+		It("should use a direct ResourceClaimName", func() {
+			pod := &corev1.Pod{}
+			claim := corev1.PodResourceClaim{Name: "ref", ResourceClaimName: lo.ToPtr("claim-a")}
+			name, ok := resourceClaimName(pod, &claim)
+			Expect(ok).To(BeTrue())
+			Expect(name).To(Equal("claim-a"))
+		})
+		It("should resolve a template's generated name from pod status", func() {
+			pod := &corev1.Pod{Status: corev1.PodStatus{ResourceClaimStatuses: []corev1.PodResourceClaimStatus{
 				{Name: "ref", ResourceClaimName: lo.ToPtr("generated-a")},
-			}}},
-			claim:    corev1.PodResourceClaim{Name: "ref"},
-			wantName: "generated-a",
-			wantOK:   true,
-		},
-		{
-			name: "template with nil generated name is skipped",
-			pod: &corev1.Pod{Status: corev1.PodStatus{ResourceClaimStatuses: []corev1.PodResourceClaimStatus{
+			}}}
+			claim := corev1.PodResourceClaim{Name: "ref"}
+			name, ok := resourceClaimName(pod, &claim)
+			Expect(ok).To(BeTrue())
+			Expect(name).To(Equal("generated-a"))
+		})
+		It("should skip a template whose generated name is nil", func() {
+			pod := &corev1.Pod{Status: corev1.PodStatus{ResourceClaimStatuses: []corev1.PodResourceClaimStatus{
 				{Name: "ref", ResourceClaimName: nil},
-			}}},
-			claim:  corev1.PodResourceClaim{Name: "ref"},
-			wantOK: false,
-		},
-		{
-			name:   "no matching status entry",
-			pod:    &corev1.Pod{},
-			claim:  corev1.PodResourceClaim{Name: "ref"},
-			wantOK: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotName, gotOK := resourceClaimName(tt.pod, &tt.claim)
-			if gotOK != tt.wantOK {
-				t.Fatalf("resourceClaimName() ok = %v, want %v", gotOK, tt.wantOK)
+			}}}
+			claim := corev1.PodResourceClaim{Name: "ref"}
+			_, ok := resourceClaimName(pod, &claim)
+			Expect(ok).To(BeFalse())
+		})
+		It("should skip when no matching status entry exists", func() {
+			pod := &corev1.Pod{}
+			claim := corev1.PodResourceClaim{Name: "ref"}
+			_, ok := resourceClaimName(pod, &claim)
+			Expect(ok).To(BeFalse())
+		})
+	})
+
+	Describe("draNodeClaim adapter", func() {
+		var it1, it2 *cloudprovider.InstanceType
+		var nc *NodeClaim
+
+		BeforeEach(func() {
+			it1 = &cloudprovider.InstanceType{
+				Name: "it-1",
+				DynamicResources: cloudprovider.DynamicResources{
+					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a")}},
+				},
 			}
-			if gotName != tt.wantName {
-				t.Fatalf("resourceClaimName() name = %q, want %q", gotName, tt.wantName)
+			it2 = &cloudprovider.InstanceType{Name: "it-2"}
+			nc = &NodeClaim{hostname: "hostname-1"}
+			nc.NodePoolName = "np-a"
+			nc.Requirements = scheduling.NewRequirements()
+			nc.InstanceTypeOptions = cloudprovider.InstanceTypes{it1, it2}
+		})
+
+		It("should map identity, nodepool, and instance types", func() {
+			adapter := &draNodeClaim{nc: nc}
+			Expect(adapter.ID()).To(Equal(unique.Make("hostname-1")))
+			Expect(adapter.NodePoolID()).To(Equal(unique.Make("np-a")))
+			its := lo.Map(adapter.InstanceTypes(), func(id unique.Handle[string], _ int) string { return id.Value() })
+			Expect(its).To(ConsistOf("it-1", "it-2"))
+		})
+		It("should expose template slices per instance type", func() {
+			adapter := &draNodeClaim{nc: nc}
+			slices := adapter.ResourceSlices()
+			Expect(slices[unique.Make("it-1")]).To(HaveLen(1))
+			Expect(slices[unique.Make("it-2")]).To(BeEmpty())
+		})
+	})
+
+	Describe("draExistingNode adapter", func() {
+		var it *cloudprovider.InstanceType
+
+		BeforeEach(func() {
+			it = &cloudprovider.InstanceType{
+				Name: "it-1",
+				DynamicResources: cloudprovider.DynamicResources{
+					ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a")}},
+				},
 			}
 		})
-	}
-}
 
-func TestDRANodeClaimAdapter(t *testing.T) {
-	it1 := &cloudprovider.InstanceType{
-		Name: "it-1",
-		DynamicResources: cloudprovider.DynamicResources{
-			ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a")}},
-		},
-	}
-	it2 := &cloudprovider.InstanceType{Name: "it-2"}
-	nc := &NodeClaim{hostname: "hostname-1"}
-	nc.NodePoolName = "np-a"
-	nc.Requirements = scheduling.NewRequirements()
-	nc.InstanceTypeOptions = cloudprovider.InstanceTypes{it1, it2}
+		It("should return no template slices for an initialized node", func() {
+			adapter := draExistingNodeForTest(true, it)
+			Expect(adapter.ResourceSlices()).To(BeEmpty())
+		})
+		It("should return the full template set for a pre-initialized node", func() {
+			adapter := draExistingNodeForTest(false, it)
+			Expect(adapter.ResourceSlices()[unique.Make("it-1")]).To(HaveLen(1))
+		})
+		It("should return no template slices for a pre-initialized node with an unresolved instance type", func() {
+			adapter := draExistingNodeForTest(false, nil)
+			Expect(adapter.ResourceSlices()).To(BeEmpty())
+		})
+	})
+})
 
-	adapter := &draNodeClaim{nc: nc}
-	if adapter.ID() != unique.Make("hostname-1") {
-		t.Errorf("ID() = %v, want hostname-1", adapter.ID().Value())
-	}
-	if adapter.NodePoolID() != unique.Make("np-a") {
-		t.Errorf("NodePoolID() = %v, want np-a", adapter.NodePoolID().Value())
-	}
-	its := lo.Map(adapter.InstanceTypes(), func(id unique.Handle[string], _ int) string { return id.Value() })
-	if len(its) != 2 || its[0] != "it-1" || its[1] != "it-2" {
-		t.Errorf("InstanceTypes() = %v, want [it-1 it-2]", its)
-	}
-	slices := adapter.ResourceSlices()
-	if got := len(slices[unique.Make("it-1")]); got != 1 {
-		t.Errorf("it-1 template slices = %d, want 1", got)
-	}
-	if got := len(slices[unique.Make("it-2")]); got != 0 {
-		t.Errorf("it-2 template slices = %d, want 0", got)
-	}
-}
-
-func TestDRAExistingNodeAdapterInitialized(t *testing.T) {
-	it := &cloudprovider.InstanceType{
-		Name: "it-1",
-		DynamicResources: cloudprovider.DynamicResources{
-			ResourceSliceTemplates: []*cloudprovider.ResourceSliceTemplate{{Driver: unique.Make("driver-a")}},
-		},
-	}
-
-	// Initialized node: ResourceSlices() must be empty (devices published in-cluster).
-	initialized := newDRAExistingNode(true, it)
-	if got := len(initialized.ResourceSlices()); got != 0 {
-		t.Errorf("initialized ResourceSlices() = %d entries, want 0", got)
-	}
-
-	// Pre-initialized node: ResourceSlices() returns the full template set for the instance type.
-	preInitialized := newDRAExistingNode(false, it)
-	slices := preInitialized.ResourceSlices()
-	if got := len(slices[unique.Make("it-1")]); got != 1 {
-		t.Errorf("pre-initialized it-1 template slices = %d, want 1", got)
-	}
-
-	// Pre-initialized node with unresolved instance type: ResourceSlices() empty.
-	noIT := newDRAExistingNode(false, nil)
-	if got := len(noIT.ResourceSlices()); got != 0 {
-		t.Errorf("pre-initialized with nil IT ResourceSlices() = %d entries, want 0", got)
-	}
-}
-
-// newDRAExistingNode builds a draExistingNode backed by a StateNode whose initialization state and labels are set for
-// testing the adapter's ResourceSlices() behavior.
-func newDRAExistingNode(initialized bool, it *cloudprovider.InstanceType) *draExistingNode {
+// draExistingNodeForTest builds a draExistingNode backed by a StateNode whose initialization state and labels are set
+// for exercising the adapter's ResourceSlices() behavior.
+func draExistingNodeForTest(initialized bool, it *cloudprovider.InstanceType) *draExistingNode {
 	labels := map[string]string{
 		corev1.LabelInstanceTypeStable: "it-1",
 		v1.NodePoolLabelKey:            "np-a",
@@ -155,7 +137,7 @@ func newDRAExistingNode(initialized bool, it *cloudprovider.InstanceType) *draEx
 	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Labels: labels}}
 	nodeClaim := &v1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Labels: labels}}
-	en := &ExistingNode{StateNode: &state.StateNode{Node: node, NodeClaim: nodeClaim}}
+	en := &ExistingNode{StateNode: &state.StateNode{Node: node, NodeClaim: nodeClaim}, instanceType: it}
 	en.requirements = scheduling.NewLabelRequirements(labels)
 	return &draExistingNode{en: en, instanceType: it}
 }

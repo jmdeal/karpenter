@@ -601,7 +601,7 @@ func (s *Scheduler) addToExistingNode(ctx context.Context, pod *corev1.Pod) erro
 		return err
 	}
 	parallelizeUntil(s.numConcurrentReconciles, len(s.existingNodes), func(i int) bool {
-		r, result, err := s.existingNodes[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.allocator, s.instanceTypeForExistingNode(s.existingNodes[i]))
+		r, result, err := s.existingNodes[i].CanAdd(ctx, pod, s.cachedPodData[pod.UID], volumes, s.allocator)
 		if err == nil {
 			mu.Lock()
 			defer mu.Unlock()
@@ -765,7 +765,7 @@ func (s *Scheduler) calculateExistingNodeClaims(ctx context.Context, stateNodes 
 	for _, node := range stateNodes {
 		taints := node.Taints()
 		daemons := s.getCompatibleDaemonPods(ctx, node, taints, daemonSetPods)
-		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, taints, resources.RequestsForPods(daemons...)))
+		s.existingNodes = append(s.existingNodes, NewExistingNode(node, s.topology, taints, resources.RequestsForPods(daemons...), s.instanceTypeForNode(node)))
 		s.updateRemainingResources(node)
 	}
 	s.sortExistingNodes()

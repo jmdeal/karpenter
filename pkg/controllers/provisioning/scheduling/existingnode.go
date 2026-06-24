@@ -38,9 +38,12 @@ type ExistingNode struct {
 	topology           *Topology
 	remainingResources v1.ResourceList
 	requirements       scheduling.Requirements
+	// instanceType is the resolved cloud provider instance type backing the node, used to source DRA template devices
+	// for uninitialized nodes. It is nil for unmanaged nodes or when the node's instance type is not in the current set.
+	instanceType *cloudprovider.InstanceType
 }
 
-func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList) *ExistingNode {
+func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, daemonResources v1.ResourceList, instanceType *cloudprovider.InstanceType) *ExistingNode {
 	// The state node passed in here must be a deep copy from cluster state as we modify it
 	// the remaining daemonResources to schedule are the total daemonResources minus what has already scheduled
 	resources.SubtractFrom(daemonResources, n.DaemonSetRequests())
@@ -61,6 +64,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 		topology:           topology,
 		remainingResources: resources.Subtract(available, daemonResources),
 		requirements:       scheduling.NewLabelRequirements(n.Labels()),
+		instanceType:       instanceType,
 	}
 	node.requirements.Add(scheduling.NewRequirement(v1.LabelHostname, v1.NodeSelectorOpIn, n.HostName()))
 	topology.Register(v1.LabelHostname, n.HostName())
@@ -70,7 +74,7 @@ func NewExistingNode(n *state.StateNode, topology *Topology, taints []v1.Taint, 
 // CanAdd returns whether the pod can be added to the ExistingNode
 // based on the taints/tolerations, volume requirements, host port compatibility,
 // requirements, resources, and topology requirements
-func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData, volumes scheduling.Volumes, allocator *dynamicresources.Allocator, instanceType *cloudprovider.InstanceType) (updatedRequirements scheduling.Requirements, allocationResult *dynamicresources.AllocationResult, err error) {
+func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData, volumes scheduling.Volumes, allocator *dynamicresources.Allocator) (updatedRequirements scheduling.Requirements, allocationResult *dynamicresources.AllocationResult, err error) {
 	// Check Taints
 	if err := scheduling.Taints(n.cachedTaints).ToleratesPod(pod); err != nil {
 		return nil, nil, err
@@ -118,7 +122,7 @@ func (n *ExistingNode) CanAdd(ctx context.Context, pod *v1.Pod, podData *PodData
 			if podData.ResourceClaimErr != nil {
 				return nil, nil, podData.ResourceClaimErr
 			}
-			result, err := allocator.Allocate(ctx, &draExistingNode{en: n, instanceType: instanceType}, podData.ResourceClaims)
+			result, err := allocator.Allocate(ctx, &draExistingNode{en: n, instanceType: n.instanceType}, podData.ResourceClaims)
 			if err != nil {
 				lastErr = fmt.Errorf("allocating dynamic resources, %w", err)
 				continue

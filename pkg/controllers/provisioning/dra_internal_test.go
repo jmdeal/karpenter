@@ -17,75 +17,64 @@ limitations under the License.
 package provisioning
 
 import (
-	"testing"
-
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
-func TestNodeOwnerName(t *testing.T) {
-	tests := []struct {
-		name      string
-		owners    []metav1.OwnerReference
-		wantName  string
-		wantOwned bool
-	}{
-		{
-			name:      "node owner reference",
-			owners:    []metav1.OwnerReference{{Kind: "Node", Name: "node-a"}},
-			wantName:  "node-a",
-			wantOwned: true,
-		},
-		{
-			name:      "no owner references",
-			owners:    nil,
-			wantOwned: false,
-		},
-		{
-			name:      "non-node owner reference",
-			owners:    []metav1.OwnerReference{{Kind: "Pod", Name: "pod-a"}},
-			wantOwned: false,
-		},
-		{
-			name:      "node owner among others",
-			owners:    []metav1.OwnerReference{{Kind: "Pod", Name: "pod-a"}, {Kind: "Node", Name: "node-b"}},
-			wantName:  "node-b",
-			wantOwned: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			slice := &resourcev1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{OwnerReferences: tt.owners}}
-			gotName, gotOwned := nodeOwnerName(slice)
-			if gotOwned != tt.wantOwned {
-				t.Fatalf("nodeOwnerName() owned = %v, want %v", gotOwned, tt.wantOwned)
-			}
-			if gotName != tt.wantName {
-				t.Fatalf("nodeOwnerName() name = %q, want %q", gotName, tt.wantName)
-			}
+var _ = Describe("DRA Provisioner Internals", func() {
+	Describe("nodeOwnerName", func() {
+		It("should return the Node owner reference name", func() {
+			slice := &resourcev1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Node", Name: "node-a"}},
+			}}
+			name, owned := nodeOwnerName(slice)
+			Expect(owned).To(BeTrue())
+			Expect(name).To(Equal("node-a"))
 		})
-	}
-}
+		It("should report no owner when there are no owner references", func() {
+			slice := &resourcev1.ResourceSlice{}
+			_, owned := nodeOwnerName(slice)
+			Expect(owned).To(BeFalse())
+		})
+		It("should report no owner when no owner reference is a Node", func() {
+			slice := &resourcev1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Pod", Name: "pod-a"}},
+			}}
+			_, owned := nodeOwnerName(slice)
+			Expect(owned).To(BeFalse())
+		})
+		It("should find the Node owner reference among others", func() {
+			slice := &resourcev1.ResourceSlice{ObjectMeta: metav1.ObjectMeta{
+				OwnerReferences: []metav1.OwnerReference{{Kind: "Pod", Name: "pod-a"}, {Kind: "Node", Name: "node-b"}},
+			}}
+			name, owned := nodeOwnerName(slice)
+			Expect(owned).To(BeTrue())
+			Expect(name).To(Equal("node-b"))
+		})
+	})
 
-func TestAllConsumersDeleting(t *testing.T) {
-	deleting := sets.New[types.UID]("a", "b")
-	tests := []struct {
-		name     string
-		podUIDs  []types.UID
-		expected bool
-	}{
-		{name: "all deleting", podUIDs: []types.UID{"a", "b"}, expected: true},
-		{name: "subset deleting", podUIDs: []types.UID{"a"}, expected: true},
-		{name: "one non-deleting", podUIDs: []types.UID{"a", "c"}, expected: false},
-		{name: "none deleting", podUIDs: []types.UID{"c"}, expected: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := allConsumersDeleting(tt.podUIDs, deleting); got != tt.expected {
-				t.Fatalf("allConsumersDeleting() = %v, want %v", got, tt.expected)
-			}
+	Describe("allConsumersDeleting", func() {
+		var deleting sets.Set[types.UID]
+
+		BeforeEach(func() {
+			deleting = sets.New[types.UID]("a", "b")
 		})
-	}
-}
+
+		It("should be true when all consumers are deleting", func() {
+			Expect(allConsumersDeleting([]types.UID{"a", "b"}, deleting)).To(BeTrue())
+		})
+		It("should be true when consumers are a subset of deleting pods", func() {
+			Expect(allConsumersDeleting([]types.UID{"a"}, deleting)).To(BeTrue())
+		})
+		It("should be false when any consumer is not deleting", func() {
+			Expect(allConsumersDeleting([]types.UID{"a", "c"}, deleting)).To(BeFalse())
+		})
+		It("should be false when no consumer is deleting", func() {
+			Expect(allConsumersDeleting([]types.UID{"c"}, deleting)).To(BeFalse())
+		})
+	})
+})
