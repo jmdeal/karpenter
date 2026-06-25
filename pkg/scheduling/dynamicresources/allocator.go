@@ -282,9 +282,9 @@ func (a *Allocator) Allocate(
 	// Phase 2: Pool gathering with cache, using the tightened effective requirements.
 	var pools []*Pool
 	if cached, ok := a.poolCache[nodeClaim.ID()]; ok {
-		pools = FilterPools(cached, classifyRes.requirements)
+		pools = FilterPools(cached, classifyRes.requirements, nodeClaim.NodeName())
 	} else {
-		pools = GatherPools(a.inClusterSlices, classifyRes.requirements)
+		pools = GatherPools(a.inClusterSlices, classifyRes.requirements, nodeClaim.NodeName())
 	}
 
 	// Build template devices by instance type.
@@ -557,7 +557,7 @@ func (a *allocator) allocate(instanceTypes []InstanceTypeID) (*AllocationResult,
 			allocator:     a.Allocator,
 			nodeClaimID:   a.nodeClaim.ID(),
 			deviceIDsByIT: deviceIDsByIT,
-			filteredPools: FilterPools(initialPools, a.requirements),
+			filteredPools: FilterPools(initialPools, a.requirements, a.nodeClaim.NodeName()),
 			claimMetadata: claimAllocMetaByRC,
 		},
 	}, nil
@@ -705,7 +705,7 @@ func (a *allocator) tryDevice(
 			pools: a.pools,
 		})
 		a.requirements.Add(dw.TopologyRequirements.Values()...)
-		a.pools = FilterPools(a.pools, a.requirements)
+		a.pools = FilterPools(a.pools, a.requirements, a.nodeClaim.NodeName())
 		pushedSnapshot = true
 	}
 
