@@ -172,18 +172,6 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 		nodeClaimRequirements.Add(volReqs.Values()...)
 	}
 
-	// Check Topology Requirements
-	// NOTE: podData.StrictRequirements does NOT include volume requirements,
-	// ensuring TSC counting uses pod's original affinity.
-	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
-		return nil, nil, nil, nil, err
-	}
-	nodeClaimRequirements.Add(topologyRequirements.Values()...)
-
 	// Simulate DRA device allocation before instance-type filtering so the topology requirements contributed by the
 	// allocated devices tighten the NodeClaim's requirements and feed the full filtering pipeline.
 	var allocationResult *dynamicresources.AllocationResult
@@ -202,6 +190,20 @@ func (n *NodeClaim) tryVolumeAlternative(ctx context.Context, pod *corev1.Pod, p
 		nodeClaimRequirements.Add(result.Requirements.Values()...)
 		allocationResult = result
 	}
+
+	// Check Topology Requirements
+	// NOTE: podData.StrictRequirements does NOT include volume requirements, ensuring TSC counting uses pod's original
+	// affinity.
+	// NOTE: Topology requirements should come last since they can result in a single domain from a set of compatible
+	// domains. This can result in unnecessary failures from subsequent checks that narrow requirements.
+	topologyRequirements, err := n.topology.AddRequirements(pod, n.Spec.Taints, podData.StrictRequirements, nodeClaimRequirements, scheduling.AllowUndefinedWellKnownLabels)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if err = nodeClaimRequirements.Compatible(topologyRequirements, scheduling.AllowUndefinedWellKnownLabels); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	nodeClaimRequirements.Add(topologyRequirements.Values()...)
 
 	// Check instance type combinations
 	requests := resources.Merge(n.Spec.Resources.Requests, podData.Requests)

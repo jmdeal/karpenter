@@ -637,10 +637,14 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 	instanceTypeName := binding.Node.Labels[corev1.LabelInstanceTypeStable]
 	itID := unique.Make(instanceTypeName)
 
-	for _, podClaim := range pod.Spec.ResourceClaims {
-		claimName := podClaim.Name
-		if podClaim.ResourceClaimName != nil {
-			claimName = *podClaim.ResourceClaimName
+	for i := range pod.Spec.ResourceClaims {
+		podClaim := &pod.Spec.ResourceClaims[i]
+		// Resolve the backing claim name the same way the allocator does: a direct ResourceClaimName, otherwise the
+		// generated name recorded in pod status (for ResourceClaimTemplate references). A reference with no generated
+		// claim is skipped — there is nothing to allocate.
+		claimName, ok := resolvedClaimName(pod, podClaim)
+		if !ok {
+			continue
 		}
 		key := types.NamespacedName{Namespace: pod.Namespace, Name: claimName}
 
@@ -680,6 +684,26 @@ func expectDRAClaimsAllocated(ctx context.Context, c client.Client, pod *corev1.
 		}
 		ExpectApplied(ctx, c, claim)
 	}
+}
+
+// resolvedClaimName returns the name of the ResourceClaim backing a pod's claim reference: a direct ResourceClaimName,
+// otherwise the generated name recorded in pod.Status.ResourceClaimStatuses for a ResourceClaimTemplate reference. The
+// second return is false when no claim was generated for the reference. This mirrors the allocator's own resolution so
+// the test framework allocates the same claims the allocator did.
+func resolvedClaimName(pod *corev1.Pod, pc *corev1.PodResourceClaim) (string, bool) {
+	if pc.ResourceClaimName != nil {
+		return *pc.ResourceClaimName, true
+	}
+	for i := range pod.Status.ResourceClaimStatuses {
+		status := &pod.Status.ResourceClaimStatuses[i]
+		if status.Name == pc.Name {
+			if status.ResourceClaimName == nil {
+				return "", false
+			}
+			return *status.ResourceClaimName, true
+		}
+	}
+	return "", false
 }
 
 // requestNamesForDevices maps each of the deviceCount allocated devices (in allocation order) to the name of the claim

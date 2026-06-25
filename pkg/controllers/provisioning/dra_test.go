@@ -279,6 +279,28 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(nodeClaims).To(HaveLen(1))
 			Expect(nodeClaims[0].Annotations).ToNot(HaveKey(v1.DRADriversAnnotationKey))
 		})
+		It("should resolve and allocate a claim generated from a ResourceClaimTemplate (A4)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			// The pod references a ResourceClaimTemplate; the framework generates the per-pod claim (the integration
+			// analogue of the in-cluster claim-template controller) before scheduling.
+			ExpectApplied(ctx, env.Client, test.ResourceClaimTemplate(resourcev1.ResourceClaimTemplate{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-template", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimTemplateSpec{Spec: resourcev1.ResourceClaimSpec{
+					Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{test.ExactDeviceRequest("req", "gpu", 1)}},
+				}},
+			}))
+
+			pod := draPodForClaims(test.PodResourceClaimTemplateReference("gpu", "gpu-template"))
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			ExpectNodeClaimDRADrivers(nodeClaims[0], gpuDriver)
+			// The generated claim is named "<pod>-<claimRef>" by the processing expectation and ends up allocated.
+			ExpectResourceClaimAllocated(ctx, env.Client, pod.Namespace, fmt.Sprintf("%s-gpu", pod.Name), gpuDriver)
+		})
 	})
 
 	Context("Template (in-flight) device allocation (B)", func() {
@@ -332,6 +354,38 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
 			Expect(devices).To(HaveLen(3), "All mode should allocate every device on the instance type")
+		})
+		It("should satisfy a MatchAttribute constraint across two requests (F2)", func() {
+			// An instance type whose two GPU template devices share a concrete pcieRoot attribute. A claim with two
+			// requests and a MatchAttribute constraint must pick devices sharing that attribute value. This is an
+			// integration smoke test; deep constraint logic lives in the allocator unit tests. The attribute name must be
+			// a domain-qualified C identifier per the resource.k8s.io API.
+			const pcieRoot = gpuDriver + "/pcieRoot"
+			it := fake.NewInstanceType("gpu-it", fake.WithResourceSliceTemplates(
+				fake.ResourceSliceTemplate(gpuDriver, "gpu-it-pool",
+					fake.Device("gpu-0", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{pcieRoot: test.StringAttribute("root-a")}),
+					fake.Device("gpu-1", map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{pcieRoot: test.StringAttribute("root-a")}),
+				),
+			))
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{it}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, test.ResourceClaim(resourcev1.ResourceClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-claim", Namespace: "default"},
+				Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{
+					Requests: []resourcev1.DeviceRequest{
+						test.ExactDeviceRequest("req-a", "gpu", 1),
+						test.ExactDeviceRequest("req-b", "gpu", 1),
+					},
+					Constraints: []resourcev1.DeviceConstraint{test.MatchAttributeConstraint(pcieRoot)},
+				}},
+			}))
+
+			pod := draPod("gpu", "gpu-claim")
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
+			Expect(devices).To(HaveLen(2), "both requests are satisfied by attribute-sharing devices")
 		})
 	})
 
@@ -478,9 +532,54 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			ExpectNotScheduled(ctx, env.Client, pod)
 			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
 		})
+		It("should skip a claim-template reference whose generated name is nil (U4)", func() {
+			// A ResourceClaimTemplate reference whose status entry reports no generated claim name (claim generation was
+			// unnecessary). The allocator must skip it without panicking or allocating, and the pod schedules normally.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+
+			pod := draPodForClaims(test.PodResourceClaimTemplateReference("gpu", "gpu-template"))
+			// Pre-populate the status with a nil generated name so the processing expectation leaves it untouched and the
+			// allocator exercises the "no claim needed" skip branch.
+			pod.Status.ResourceClaimStatuses = []corev1.PodResourceClaimStatus{{Name: "gpu", ResourceClaimName: nil}}
+			provisionDRA(pod)
+
+			// No claim to allocate, so the pod schedules and no DRA driver annotation is recorded.
+			ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			Expect(nodeClaims[0].Annotations).ToNot(HaveKey(v1.DRADriversAnnotationKey))
+		})
 	})
 
 	Context("Conflicts & contention (X)", func() {
+		It("should fail to schedule a pod whose two claims require incompatible zones (X1)", func() {
+			// plain-it provides no template devices, so both claims must be satisfied by the zoned in-cluster pools —
+			// forcing the genuine zone conflict (an instance type with a template GPU would let the gpu claim escape the
+			// zone constraint).
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.DeviceClassWithSelector("gpu", gpuDriver),
+				test.DeviceClassWithSelector("nic", nicDriver),
+			)
+			ExpectApplied(ctx, env.Client,
+				test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("nic-claim", test.ExactDeviceRequest("req", "nic", 1)),
+			)
+			// The two pools are pinned to different zones, so no single NodeClaim can satisfy both claims.
+			ExpectApplied(ctx, env.Client,
+				zonedSlice("zoned-gpu-pool", gpuDriver, "test-zone-1", "zoned-gpu-0"),
+				zonedSlice("zoned-nic-pool", nicDriver, "test-zone-2", "zoned-nic-0"),
+			)
+			pod := draPodForClaims(
+				test.PodResourceClaimReference("gpu", "gpu-claim"),
+				test.PodResourceClaimReference("nic", "nic-claim"),
+			)
+			provisionDRA(pod)
+
+			ExpectNotScheduled(ctx, env.Client, pod)
+			Expect(ExpectNodeClaims(ctx, env.Client)).To(HaveLen(0))
+		})
 		It("should fail when DRA prunes all instance types that otherwise fit (X3)", func() {
 			// Only the arm instance type provides the GPU device, but the pod requires amd64, so after DRA pruning no
 			// instance type satisfies both constraints.
@@ -598,9 +697,60 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			Expect(found).To(BeTrue())
 			Expect(req.Values).To(ConsistOf("test-zone-2"))
 		})
+		It("should collapse a NodeClaim to the shared zone of two compatibly-zoned claims (D2)", func() {
+			// plain-it provides no templates, so both claims are satisfied by the zoned in-cluster pools and both
+			// contribute their zone requirement — exercising the intersection of two device topologies.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool,
+				test.DeviceClassWithSelector("gpu", gpuDriver),
+				test.DeviceClassWithSelector("nic", nicDriver),
+			)
+			ExpectApplied(ctx, env.Client,
+				test.ResourceClaimForRequests("gpu-claim", test.ExactDeviceRequest("req", "gpu", 1)),
+				test.ResourceClaimForRequests("nic-claim", test.ExactDeviceRequest("req", "nic", 1)),
+			)
+			// Two cluster-managed pools, both constrained to test-zone-2 — their topology requirements intersect.
+			ExpectApplied(ctx, env.Client,
+				zonedSlice("zoned-gpu-pool", gpuDriver, "test-zone-2", "zoned-gpu-0"),
+				zonedSlice("zoned-nic-pool", nicDriver, "test-zone-2", "zoned-nic-0"),
+			)
+			pod := draPodForClaims(
+				test.PodResourceClaimReference("gpu", "gpu-claim"),
+				test.PodResourceClaimReference("nic", "nic-claim"),
+			)
+			provisionDRA(pod)
+
+			ExpectScheduled(ctx, env.Client, pod)
+			nodeClaims := ExpectNodeClaims(ctx, env.Client)
+			Expect(nodeClaims).To(HaveLen(1))
+			req, found := lo.Find(nodeClaims[0].Spec.Requirements, func(r v1.NodeSelectorRequirementWithMinValues) bool {
+				return r.Key == corev1.LabelTopologyZone
+			})
+			Expect(found).To(BeTrue())
+			Expect(req.Values).To(ConsistOf("test-zone-2"))
+		})
 	})
 
 	Context("Cross-loop in-memory claim reuse (E)", func() {
+		It("should allocate a shared in-cluster claim once and reuse it within a single loop (E1)", func() {
+			// Two pods reference the same claim in one provisioning round. The claim is satisfied by a cluster-wide
+			// in-cluster device (not a template), so it is allocated once and the second pod reuses that in-memory
+			// allocation rather than re-running the DFS or allocating a second device.
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{fake.NewInstanceType("plain-it")}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+			ExpectApplied(ctx, env.Client, clusterWideSlice("shared-gpu-pool", gpuDriver, "shared-gpu-0", "shared-gpu-1"))
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("shared-claim", test.ExactDeviceRequest("req", "gpu", 1)))
+
+			podA := draPod("gpu", "shared-claim")
+			podB := draPod("gpu", "shared-claim")
+			provisionDRA(podA, podB)
+
+			ExpectScheduled(ctx, env.Client, podA)
+			ExpectScheduled(ctx, env.Client, podB)
+			// The shared claim is allocated exactly one device, shared by both pods.
+			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "shared-claim", gpuDriver)
+			Expect(devices).To(HaveLen(1))
+		})
 		It("should land a second pod on the same NodeClaim for a template-allocated shared claim (E2)", func() {
 			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 2)}
 			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
@@ -741,6 +891,39 @@ var _ = Describe("Dynamic Resource Allocation", func() {
 			ExpectScheduled(ctx, env.Client, pod)
 			devices := ExpectResourceClaimAllocated(ctx, env.Client, "default", "gpu-claim", gpuDriver)
 			Expect(devices).ToNot(ConsistOf(NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
+		})
+		It("should not double-count a node's devices across the uninitialized→initialized transition (I2)", func() {
+			cloudProvider.InstanceTypes = []*cloudprovider.InstanceType{gpuInstanceType("gpu-it", 1)}
+			ExpectApplied(ctx, env.Client, nodePool, test.DeviceClassWithSelector("gpu", gpuDriver))
+
+			// A pre-initialized node publishes its single GPU device in-cluster, but while uninitialized that device is
+			// represented by the node's template (published slice excluded).
+			node := existingNode("gpu-it", false, corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("4"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourcePods: resource.MustParse("10"),
+			})
+			ExpectApplied(ctx, env.Client, nodeLocalSlice(node, gpuDriver, "incluster-gpu-0"))
+
+			// Run 1 (uninitialized): the pod is satisfied via templates, not the existing node's published slice.
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("claim-a", test.ExactDeviceRequest("req", "gpu", 1)))
+			podA := draPod("gpu", "claim-a")
+			provisionDRA(podA)
+			ExpectScheduled(ctx, env.Client, podA)
+			devicesA := ExpectResourceClaimAllocated(ctx, env.Client, "default", "claim-a", gpuDriver)
+			Expect(devicesA).ToNot(ConsistOf(NodeLocalPoolName(gpuDriver, node.Name) + "/incluster-gpu-0"))
+
+			// Initialize the node so its published slice becomes authoritative for subsequent runs.
+			ExpectMakeNodesInitialized(ctx, env.Client, env.Clock, node)
+			ExpectReconcileSucceeded(ctx, nodeController, client.ObjectKeyFromObject(node))
+
+			// Run 2 (initialized): the node's published device is now its single device. A second claim that requires the
+			// node's device must not double-count — since run 1 consumed the node's only template device via a separate
+			// NodeClaim, the published device is still free and can be allocated exactly once here.
+			ExpectApplied(ctx, env.Client, test.ResourceClaimForRequests("claim-b", test.ExactDeviceRequest("req", "gpu", 1)))
+			podB := draPod("gpu", "claim-b")
+			provisionDRA(podB)
+			ExpectScheduled(ctx, env.Client, podB)
+			devicesB := ExpectResourceClaimAllocated(ctx, env.Client, "default", "claim-b", gpuDriver)
+			Expect(devicesB).To(HaveLen(1), "the initialized node's published device is allocated exactly once")
 		})
 	})
 })
