@@ -256,7 +256,9 @@ func (n *NodeClaim) Add(ctx context.Context, pod *corev1.Pod, podData *PodData, 
 	// Commit the DRA device allocation now that the placement decision is finalized, then release the allocator's
 	// reservations for any instance types that the allocator simulated but were pruned from the NodeClaim's final
 	// candidate set (e.g. by offering/fit filters). This frees those instance types' devices for other NodeClaims.
-	if allocationResult != nil {
+	// The Allocation handle is nil when there were no new device allocations to commit (e.g. every claim was already
+	// allocated in-cluster), in which case there is nothing to commit or release.
+	if allocationResult != nil && allocationResult.Allocation != nil {
 		allocationResult.Allocation.Commit(ctx)
 		committed := sets.New(lo.Map(instanceTypes, func(it *cloudprovider.InstanceType, _ int) string { return it.Name })...)
 		var pruned []dynamicresources.InstanceTypeID

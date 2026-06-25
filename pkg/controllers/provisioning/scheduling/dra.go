@@ -47,6 +47,11 @@ func (d *draNodeClaim) ID() dynamicresources.NodeClaimID {
 	return unique.Make(d.nc.hostname)
 }
 
+func (d *draNodeClaim) NodeName() string {
+	// In-flight and new NodeClaims have no concrete node, so node-name-pinned published slices never apply.
+	return ""
+}
+
 func (d *draNodeClaim) NodePoolID() dynamicresources.NodePoolID {
 	return unique.Make(d.nc.NodePoolName)
 }
@@ -82,6 +87,14 @@ type draExistingNode struct {
 
 func (d *draExistingNode) ID() dynamicresources.NodeClaimID {
 	return unique.Make(d.en.ProviderID())
+}
+
+func (d *draExistingNode) NodeName() string {
+	// Published ResourceSlices pinned via spec.nodeName are accessible only from the node with this name.
+	if d.en.Node != nil {
+		return d.en.Node.Name
+	}
+	return ""
 }
 
 func (d *draExistingNode) NodePoolID() dynamicresources.NodePoolID {

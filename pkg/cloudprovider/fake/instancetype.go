@@ -19,10 +19,12 @@ package fake
 import (
 	"fmt"
 	"strings"
+	"unique"
 
 	"github.com/awslabs/operatorpkg/option"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -198,6 +200,31 @@ func NewInstanceType(name string, opts ...InstanceTypeOptions) *cloudprovider.In
 			},
 		},
 	}
+}
+
+// ResourceSliceTemplate builds a cloud provider ResourceSliceTemplate with the given driver, pool, and devices.
+// It is a convenience for tests constructing instance types with DRA device shapes via WithResourceSliceTemplates.
+func ResourceSliceTemplate(driver, pool string, devices ...cloudprovider.Device) cloudprovider.ResourceSliceTemplate {
+	return cloudprovider.ResourceSliceTemplate{
+		Driver:  unique.Make(driver),
+		Pool:    cloudprovider.ResourcePool{Name: unique.Make(pool)},
+		Devices: devices,
+	}
+}
+
+// Device builds a cloud provider DRA device with the given name and optional attributes.
+func Device(name string, attributes map[resourcev1.QualifiedName]resourcev1.DeviceAttribute) cloudprovider.Device {
+	return cloudprovider.Device{
+		Name:       unique.Make(name),
+		Attributes: attributes,
+	}
+}
+
+// Devices builds a slice of attribute-less DRA devices from the given names.
+func Devices(names ...string) []cloudprovider.Device {
+	return lo.Map(names, func(name string, _ int) cloudprovider.Device {
+		return Device(name, nil)
+	})
 }
 
 // InstanceTypesAssorted create many unique instance types with varying CPU/memory/architecture/OS/zone/capacity type.

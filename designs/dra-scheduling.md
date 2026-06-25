@@ -80,7 +80,9 @@ Devices come from two sources, prioritized in this order:
 
 Published to the Kubernetes API server as `ResourceSlice` objects by DRA drivers. These represent real, existing devices on nodes in the cluster. In-cluster devices are organized into **pools**, where each pool is identified by a `(driver, poolName)` pair and may span multiple ResourceSlice objects.
 
-In-cluster devices may be **node-local** (accessible only from nodes matching a `NodeSelector`) or **cluster-wide** (accessible from all nodes via `AllNodes: true`). Node-local devices carry topology requirements that constrain which nodes can use them.
+In-cluster devices may be **node-local** or **cluster-wide** (accessible from all nodes via `AllNodes: true`). Node-local devices come in two forms:
+- **`NodeName`-pinned**: the slice sets `spec.nodeName` to a single node. These devices are accessible only from that exact node, so they can satisfy an existing node whose node name matches but can never satisfy an in-flight NodeClaim (which has no concrete node yet). They carry no label topology requirement — the node identity itself is the constraint.
+- **`NodeSelector`-scoped**: the slice uses a label `NodeSelector`. These carry topology requirements that constrain which nodes can use them, and may match both existing nodes and in-flight NodeClaims whose requirements are compatible.
 
 `ResourceSlice` objects owned by **uninitialized nodes** (nodes that have not yet reached the `Initialized` status condition) are excluded from pools. Until a node is initialized, its devices are represented by template devices instead, so its published slices are not counted as in-cluster devices (see [NodeClaim Abstraction](#nodeclaim-abstraction) and [Scheduler Initialization](#scheduler-initialization)).
 
@@ -125,7 +127,7 @@ Pools are built from in-cluster `ResourceSlice` objects published to the API ser
 1. Groups slices by `(driver, poolName)`.
 2. Tracks the highest generation per pool. When a newer generation is encountered, all previously accumulated slices for that pool are discarded.
 3. Determines **completeness** by comparing the total slice count at the current generation against the pool's declared `ResourceSliceCount`. Completeness is a global property computed across all slices (matching and non-matching).
-4. Filters slices by node affinity compatibility with the NodeClaim's requirements. Only matching slices contribute devices; non-matching slices still participate in generation tracking and completeness checks.
+4. Filters slices by node affinity accessibility to the NodeClaim. A slice's devices are accessible when the slice is `AllNodes`, when it pins itself via `spec.nodeName` and that name equals the NodeClaim's node (existing nodes only — in-flight NodeClaims have no node name and never match a `NodeName`-pinned slice), or when its label `NodeSelector` is compatible with the NodeClaim's requirements. Only accessible slices contribute devices; inaccessible slices still participate in generation tracking and completeness checks.
 5. Detects **invalid** pools with duplicate device names across slices.
 
 For in-flight NodeClaims, a pool is included if it is compatible with *any* remaining candidate instance type.

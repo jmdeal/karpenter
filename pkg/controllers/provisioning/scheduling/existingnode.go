@@ -173,8 +173,9 @@ func (n *ExistingNode) Add(ctx context.Context, pod *v1.Pod, podData *PodData, n
 	n.topology.Record(pod, n.cachedTaints, nodeRequirements)
 	n.HostPortUsage().Add(pod, scheduling.GetHostPorts(pod))
 	n.VolumeUsage().Add(pod, volumes)
-	// Commit the DRA device allocation now that the placement decision is finalized.
-	if allocationResult != nil {
+	// Commit the DRA device allocation now that the placement decision is finalized. The Allocation handle is nil when
+	// there were no new device allocations to commit (e.g. every claim was already allocated in-cluster).
+	if allocationResult != nil && allocationResult.Allocation != nil {
 		allocationResult.Allocation.Commit(ctx)
 	}
 }
