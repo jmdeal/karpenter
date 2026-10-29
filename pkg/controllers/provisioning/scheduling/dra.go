@@ -60,6 +60,12 @@ func (d *draNodeClaim) Requirements() scheduling.Requirements {
 	return d.nc.Requirements
 }
 
+// Superposed is true: a NodeClaim being planned is still a superposition of the instance types it could launch as, and
+// of the label values the cloud provider will resolve at launch.
+func (d *draNodeClaim) Superposed() bool {
+	return true
+}
+
 func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
 	return lo.Map(d.nc.InstanceTypeOptions, func(it *cloudprovider.InstanceType, _ int) dynamicresources.InstanceTypeID {
 		return unique.Make(it.Name)
@@ -103,6 +109,12 @@ func (d *draExistingNode) NodePoolID() dynamicresources.NodePoolID {
 
 func (d *draExistingNode) Requirements() scheduling.Requirements {
 	return d.en.requirements
+}
+
+// Superposed is false: the node has launched, so its labels describe what was launched, and a label the node doesn't
+// define is absent from it.
+func (d *draExistingNode) Superposed() bool {
+	return false
 }
 
 func (d *draExistingNode) InstanceTypes() []dynamicresources.InstanceTypeID {

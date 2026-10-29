@@ -84,6 +84,10 @@ type NodeClaim interface {
 	NodePoolID() NodePoolID
 	// Requirements returns the current scheduling requirements.
 	Requirements() scheduling.Requirements
+	// Superposed reports whether the NodeClaim is still a superposition of the nodes it could launch as. A well-known
+	// label that Requirements doesn't define is open to any value the cloud provider may launch. Existing nodes aren't
+	// superposed: their labels describe what was launched, so a label Requirements doesn't define is absent from the node.
+	Superposed() bool
 	// InstanceTypes returns the candidate instance types. For existing nodes, this is a single entry.
 	InstanceTypes() []InstanceTypeID
 	// ResourceSlices returns per-instance-type in-flight ResourceSlice templates.
