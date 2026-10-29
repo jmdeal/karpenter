@@ -37,7 +37,7 @@ import (
 
 // draNodeClaim adapts a scheduling *NodeClaim (in-flight or new) to the allocator's NodeClaim interface. An in-flight
 // NodeClaim is a superposition of candidate instance types; ResourceSlices() therefore surfaces the template devices
-// for every candidate instance type.
+// for every candidate instance type. An adapter is constructed for each Allocate call.
 type draNodeClaim struct {
 	nc *NodeClaim
 }
@@ -72,10 +72,19 @@ func (d *draNodeClaim) InstanceTypes() []dynamicresources.InstanceTypeID {
 	})
 }
 
+// ResourceSlices returns, for each candidate instance type, the templates of every DynamicResources set that can be a
+// source of devices for this NodeClaim: the set has an available offering, and its requirements are compatible with
+// the NodeClaim's. The two conditions are checked independently, so a set may be included even though no single
+// available offering satisfies both. That's safe: an allocation from such a set narrows the NodeClaim to requirements
+// that no available offering satisfies, and the instance type is rejected by the offering checks that follow. The
+// allocator calls ResourceSlices at most once per Allocate (see dynamicresources.NodeClaim), so the result isn't cached.
 func (d *draNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice {
-	slices := map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{}
+	slices := make(map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice, len(d.nc.InstanceTypeOptions))
 	for _, it := range d.nc.InstanceTypeOptions {
-		slices[unique.Make(it.Name)] = templateSlicesForInstanceType(it)
+		sets := lo.Filter(it.AvailableDynamicResources(), func(dr *cloudprovider.DynamicResources, _ int) bool {
+			return d.nc.Requirements.IsCompatible(dr.Requirements, scheduling.AllowUndefinedWellKnownLabels)
+		})
+		slices[unique.Make(it.Name)] = templateSlices(sets)
 	}
 	return slices
 }
@@ -83,7 +92,9 @@ func (d *draNodeClaim) ResourceSlices() map[dynamicresources.InstanceTypeID][]dy
 // draExistingNode adapts a scheduling *ExistingNode to the allocator's NodeClaim interface. An existing node has a
 // single known instance type. Once initialized, its devices are published as in-cluster ResourceSlices, so
 // ResourceSlices() is empty. While uninitialized (pre-initialized), template devices are the source of truth, so
-// ResourceSlices() returns the full template set for the node's instance type.
+// ResourceSlices() returns every DynamicResources set for the node's instance type. Sets aren't filtered by
+// availability, since an offering becoming unavailable after launch doesn't change what the node publishes; the node's
+// labels select the launched configuration's sets, since an existing node isn't superposed (see Superposed).
 type draExistingNode struct {
 	en *ExistingNode
 	// instanceType is the resolved cloud provider instance type for the node, or nil if it could not be resolved
@@ -127,14 +138,20 @@ func (d *draExistingNode) ResourceSlices() map[dynamicresources.InstanceTypeID][
 		return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{}
 	}
 	return map[dynamicresources.InstanceTypeID][]dynamicresources.ResourceSlice{
-		unique.Make(d.instanceType.Name): templateSlicesForInstanceType(d.instanceType),
+		unique.Make(d.instanceType.Name): templateSlices(d.instanceType.DynamicResources),
 	}
 }
 
-func templateSlicesForInstanceType(it *cloudprovider.InstanceType) []dynamicresources.ResourceSlice {
-	return lo.Map(it.DynamicResources.ResourceSliceTemplates, func(t *cloudprovider.ResourceSliceTemplate, _ int) dynamicresources.ResourceSlice {
-		return dynamicresources.NewTemplateSlice(t)
-	})
+// templateSlices wraps the templates of the given DynamicResources sets, in order, tagging each with its set's
+// requirements.
+func templateSlices(sets []*cloudprovider.DynamicResources) []dynamicresources.ResourceSlice {
+	var slices []dynamicresources.ResourceSlice
+	for _, dr := range sets {
+		for _, t := range dr.ResourceSliceTemplates {
+			slices = append(slices, dynamicresources.NewScopedTemplateSlice(t, dr.Requirements))
+		}
+	}
+	return slices
 }
 
 // instanceTypeForNode resolves the cloud provider instance type backing a node from the scheduler's per-NodePool
